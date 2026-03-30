@@ -10,6 +10,7 @@ onboarding_bp = Blueprint("onboarding", __name__)
 def sync_clerk_user():
     try:
         data = request.json or {}
+        print("[ONBOARDING] sync_clerk_user payload:", data, flush=True)
 
         clerk_user_id = data.get("clerk_user_id")
         name = data.get("name")
@@ -64,6 +65,7 @@ def sync_clerk_user():
         }), 201
 
     except Exception as e:
+        print("[ONBOARDING][SYNC ERROR]", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -71,6 +73,7 @@ def sync_clerk_user():
 def complete_onboarding():
     try:
         data = request.json or {}
+        print("[ONBOARDING] complete_onboarding payload:", data, flush=True)
 
         clerk_user_id = data.get("clerk_user_id")
         company_name = data.get("company_name")
@@ -84,6 +87,8 @@ def complete_onboarding():
             return jsonify({"error": "company_name, sender_email and sender_phone are required"}), 400
 
         user = usersCollection.find_one({"clerk_user_id": clerk_user_id})
+        print("[ONBOARDING] fetched user:", user, flush=True)
+
         if not user:
             return jsonify({"error": "User not found"}), 404
 
@@ -107,6 +112,7 @@ def complete_onboarding():
 
         company_result = compCollection.insert_one(company_doc)
         company_id = str(company_result.inserted_id)
+        print("[ONBOARDING] created company_id:", company_id, flush=True)
 
         usersCollection.update_one(
             {"_id": user["_id"]},
@@ -127,6 +133,7 @@ def complete_onboarding():
         }), 200
 
     except Exception as e:
+        print("[ONBOARDING][COMPLETE ERROR]", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -162,4 +169,5 @@ def get_me(clerk_user_id):
         }), 200
 
     except Exception as e:
+        print("[ONBOARDING][ME ERROR]", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
