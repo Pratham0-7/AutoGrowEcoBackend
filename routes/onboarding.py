@@ -115,10 +115,11 @@ def complete_onboarding():
         print("[ONBOARDING] created company_id:", company_id, flush=True)
 
         usersCollection.update_one(
-            {"_id": user["_id"]},
+            {"clerk_user_id": user["clerk_user_id"]},
             {
                 "$set": {
                     "company_id": company_id,
+                    "company_name": company_name,
                     "onboarding_completed": True
                 }
             }
