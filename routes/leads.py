@@ -448,7 +448,7 @@ def start_followup(lead_id):
         subject = data.get("subject", "Follow-up from AGE")
         message = data.get("message", "").strip()
         channel = data.get("channel")
-        interval_days = data.get("interval_days", 2)
+        interval_days = int(data.get("interval_days", 2))
 
         if not message:
             return jsonify({"error": "Message is required"}), 400
@@ -456,9 +456,15 @@ def start_followup(lead_id):
         if channel not in ["email", "sms", "both"]:
             return jsonify({"error": "Invalid channel"}), 400
 
+        if interval_days not in [2, 3, 4, 5, 6, 7]:
+            return jsonify({"error": "Interval must be between 2 and 7 days"}), 400
+
         lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
         if not lead:
             return jsonify({"error": "Lead not found"}), 404
+
+        if channel in ["email", "both"] and not lead.get("email"):
+            return jsonify({"error": "This lead has no email address"}), 400
 
         now = datetime.utcnow()
 
@@ -475,10 +481,10 @@ def start_followup(lead_id):
 
         campaign_result = campCollection.insert_one(campaign)
 
-        # 🔥 TEST MODE (10 seconds)
+        # TEST MODE
         next_followup = now + timedelta(seconds=10)
 
-        # ✅ PRODUCTION MODE (uncomment later)
+        # PRODUCTION MODE
         # next_followup = now + timedelta(days=interval_days)
 
         leadCollection.update_one(
