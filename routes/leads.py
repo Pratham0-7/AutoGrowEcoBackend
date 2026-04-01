@@ -7,7 +7,13 @@ from datetime import datetime, timedelta
 import boto3
 from botocore.exceptions import ClientError
 
-from db import leadCollection, campCollection, msgCollection, usersCollection, compCollection
+from db import (
+    leadCollection,
+    campCollection,
+    msgCollection,
+    usersCollection,
+    compCollection,
+)
 
 leads_bp = Blueprint("leads", __name__)
 
@@ -62,30 +68,15 @@ def build_email_html(final_message, yes_link, no_link):
 def send_email_ses(to_email, subject, body_text, sender_email, html_body=None):
     ses_client = boto3.client("sesv2", region_name=SES_REGION)
 
-    body = {
-        "Text": {
-            "Data": body_text
-        }
-    }
+    body = {"Text": {"Data": body_text}}
 
     if html_body:
-        body["Html"] = {
-            "Data": html_body
-        }
+        body["Html"] = {"Data": html_body}
 
     response = ses_client.send_email(
         FromEmailAddress=sender_email,
-        Destination={
-            "ToAddresses": [to_email]
-        },
-        Content={
-            "Simple": {
-                "Subject": {
-                    "Data": subject
-                },
-                "Body": body
-            }
-        }
+        Destination={"ToAddresses": [to_email]},
+        Content={"Simple": {"Subject": {"Data": subject}, "Body": body}},
     )
 
     return response
@@ -145,10 +136,7 @@ def upload_csv():
             if not name and not email and not phone:
                 continue
 
-            duplicate_query = {
-                "company_id": company_id,
-                "$or": []
-            }
+            duplicate_query = {"company_id": company_id, "$or": []}
 
             if email:
                 duplicate_query["$or"].append({"email": email})
@@ -169,19 +157,23 @@ def upload_csv():
                 if uploader_id:
                     existing_user = None
                     try:
-                        existing_user = usersCollection.find_one({"_id": ObjectId(uploader_id)})
+                        existing_user = usersCollection.find_one(
+                            {"_id": ObjectId(uploader_id)}
+                        )
                     except Exception:
                         existing_user = usersCollection.find_one({"_id": uploader_id})
 
                     if existing_user:
                         uploader_name = existing_user.get("name", "Another salesperson")
 
-                duplicates.append({
-                    "name": name,
-                    "email": email,
-                    "phone": phone,
-                    "already_uploaded_by": uploader_name
-                })
+                duplicates.append(
+                    {
+                        "name": name,
+                        "email": email,
+                        "phone": phone,
+                        "already_uploaded_by": uploader_name,
+                    }
+                )
 
                 continue
 
@@ -196,7 +188,7 @@ def upload_csv():
                 "followup_count": 0,
                 "last_followup_sent_at": None,
                 "next_followup_at": None,
-                "campaign_id": None
+                "campaign_id": None,
             }
 
             leadCollection.insert_one(lead)
@@ -204,11 +196,16 @@ def upload_csv():
 
         os.remove(filepath)
 
-        return jsonify({
-            "message": f"{inserted_count} leads uploaded successfully",
-            "skipped_duplicates": skipped_count,
-            "duplicates": duplicates
-        }), 200
+        return (
+            jsonify(
+                {
+                    "message": f"{inserted_count} leads uploaded successfully",
+                    "skipped_duplicates": skipped_count,
+                    "duplicates": duplicates,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
         if os.path.exists(filepath):
@@ -223,19 +220,21 @@ def get_leads(company_id):
 
         formatted_leads = []
         for lead in leads:
-            formatted_leads.append({
-                "_id": str(lead["_id"]),
-                "company_id": lead.get("company_id"),
-                "uploaded_by": lead.get("uploaded_by"),
-                "name": lead.get("name", ""),
-                "email": lead.get("email", ""),
-                "phone": lead.get("phone", ""),
-                "send_status": lead.get("send_status", "not sent"),
-                "response_status": lead.get("response_status", "pending"),
-                "followup_count": lead.get("followup_count", 0),
-                "last_followup_sent_at": lead.get("last_followup_sent_at"),
-                "next_followup_at": lead.get("next_followup_at")
-            })
+            formatted_leads.append(
+                {
+                    "_id": str(lead["_id"]),
+                    "company_id": lead.get("company_id"),
+                    "uploaded_by": lead.get("uploaded_by"),
+                    "name": lead.get("name", ""),
+                    "email": lead.get("email", ""),
+                    "phone": lead.get("phone", ""),
+                    "send_status": lead.get("send_status", "not sent"),
+                    "response_status": lead.get("response_status", "pending"),
+                    "followup_count": lead.get("followup_count", 0),
+                    "last_followup_sent_at": lead.get("last_followup_sent_at"),
+                    "next_followup_at": lead.get("next_followup_at"),
+                }
+            )
 
         return jsonify(formatted_leads), 200
 
@@ -253,8 +252,8 @@ def update_lead_response(lead_id):
             return jsonify({"error": "Invalid response status"}), 400
 
         result = leadCollection.update_one(
-        {"_id": ObjectId(lead_id)},
-            {"$set": {"response_status": new_status, "next_followup_at": None}}
+            {"_id": ObjectId(lead_id)},
+            {"$set": {"response_status": new_status, "next_followup_at": None}},
         )
 
         if result.matched_count == 0:
@@ -273,8 +272,7 @@ def respond_to_lead(lead_id, response):
             return jsonify({"error": "Invalid response"}), 400
 
         result = leadCollection.update_one(
-            {"_id": ObjectId(lead_id)},
-            {"$set": {"response_status": response}}
+            {"_id": ObjectId(lead_id)}, {"$set": {"response_status": response}}
         )
 
         if result.matched_count == 0:
@@ -323,7 +321,10 @@ def send_bulk(company_id):
 
         sender_email = company.get("sender_email", "")
         if send_type in ["email", "both"] and not sender_email:
-            return jsonify({"error": "Sender email not configured for this company"}), 400
+            return (
+                jsonify({"error": "Sender email not configured for this company"}),
+                400,
+            )
 
         now = datetime.utcnow()
 
@@ -334,7 +335,7 @@ def send_bulk(company_id):
             "message": template,
             "subject": subject,
             "is_active": True,
-            "created_at": now
+            "created_at": now,
         }
 
         campaign_result = campCollection.insert_one(campaign)
@@ -368,11 +369,13 @@ No: {no_link}
             try:
                 if send_type in ["email", "both"]:
                     if not lead.get("email"):
-                        failed.append({
-                            "lead_id": lead_id_str,
-                            "name": lead.get("name", ""),
-                            "reason": "Missing email"
-                        })
+                        failed.append(
+                            {
+                                "lead_id": lead_id_str,
+                                "name": lead.get("name", ""),
+                                "reason": "Missing email",
+                            }
+                        )
                         continue
 
                     send_email_ses(
@@ -380,25 +383,27 @@ No: {no_link}
                         subject=subject,
                         body_text=text_body,
                         sender_email=sender_email,
-                        html_body=html_body
+                        html_body=html_body,
                     )
 
                 # SMS placeholder for now
                 if send_type in ["sms", "both"]:
                     pass
 
-                msgCollection.insert_one({
-                    "lead_id": lead_id_str,
-                    "company_id": company_id,
-                    "channel": send_type,
-                    "message": final_message,
-                    "subject": subject,
-                    "yes_link": yes_link,
-                    "no_link": no_link,
-                    "sent_at": now,
-                    "status": "sent",
-                    "message_type": "initial"
-                })
+                msgCollection.insert_one(
+                    {
+                        "lead_id": lead_id_str,
+                        "company_id": company_id,
+                        "channel": send_type,
+                        "message": final_message,
+                        "subject": subject,
+                        "yes_link": yes_link,
+                        "no_link": no_link,
+                        "sent_at": now,
+                        "status": "sent",
+                        "message_type": "initial",
+                    }
+                )
 
                 leadCollection.update_one(
                     {"_id": lead["_id"]},
@@ -408,38 +413,47 @@ No: {no_link}
                             "campaign_id": campaign_id,
                             "followup_count": 1,
                             "last_followup_sent_at": now,
-                            "next_followup_at": now + timedelta(days=campaign["interval_days"])
+                            "next_followup_at": now
+                            + timedelta(days=campaign["interval_days"]),
                             # "next_followup_at": now + timedelta(minutes=1)
                         }
-                    }
+                    },
                 )
 
                 count += 1
 
             except ClientError as e:
-                failed.append({
-                    "lead_id": lead_id_str,
-                    "name": lead.get("name", ""),
-                    "reason": str(e)
-                })
+                failed.append(
+                    {
+                        "lead_id": lead_id_str,
+                        "name": lead.get("name", ""),
+                        "reason": str(e),
+                    }
+                )
             except Exception as e:
-                failed.append({
-                    "lead_id": lead_id_str,
-                    "name": lead.get("name", ""),
-                    "reason": str(e)
-                })
+                failed.append(
+                    {
+                        "lead_id": lead_id_str,
+                        "name": lead.get("name", ""),
+                        "reason": str(e),
+                    }
+                )
 
-        return jsonify({
-            "message": f"{count} messages sent via {send_type}",
-            "campaign_id": str(campaign_id),
-            "failed": failed
-        }), 200
+        return (
+            jsonify(
+                {
+                    "message": f"{count} messages sent via {send_type}",
+                    "campaign_id": str(campaign_id),
+                    "failed": failed,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
-    
-    
+
+
 @leads_bp.route("/start_followup/<lead_id>", methods=["POST"])
 def start_followup(lead_id):
     try:
@@ -476,25 +490,26 @@ def start_followup(lead_id):
             "subject": subject,
             "is_active": True,
             "is_recurring": True,
-            "created_at": now
+            "created_at": now,
         }
 
         campaign_result = campCollection.insert_one(campaign)
 
         # TEST MODE
-        next_followup = now + timedelta(seconds=10)
+        # next_followup = now + timedelta(seconds=10)
 
         # PRODUCTION MODE
-        # next_followup = now + timedelta(days=interval_days)
+        next_followup = now + timedelta(days=interval_days)
 
         leadCollection.update_one(
             {"_id": ObjectId(lead_id)},
             {
                 "$set": {
                     "campaign_id": campaign_result.inserted_id,
-                    "next_followup_at": next_followup
+                    "next_followup_at": next_followup,
+                    "response_status": "pending",
                 }
-            }
+            },
         )
 
         return jsonify({"message": "Follow-up started"}), 200
@@ -507,8 +522,6 @@ def start_followup(lead_id):
 def delete_company_leads(company_id):
     try:
         result = leadCollection.delete_many({"company_id": company_id})
-        return jsonify({
-            "message": f"{result.deleted_count} leads deleted"
-        }), 200
+        return jsonify({"message": f"{result.deleted_count} leads deleted"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
