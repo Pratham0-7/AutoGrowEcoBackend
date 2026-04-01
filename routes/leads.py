@@ -440,14 +440,14 @@ No: {no_link}
     
     
     
-@leads_bp.route("/schedule_single/<lead_id>", methods=["POST"])
-def schedule_single(lead_id):
+@leads_bp.route("/start_followup/<lead_id>", methods=["POST"])
+def start_followup(lead_id):
     try:
         data = request.json
+
         subject = data.get("subject", "Follow-up from AGE")
         message = data.get("message", "").strip()
         channel = data.get("channel")
-        scheduled_for = data.get("scheduled_for")
         interval_days = data.get("interval_days", 2)
 
         if not message:
@@ -456,20 +456,11 @@ def schedule_single(lead_id):
         if channel not in ["email", "sms", "both"]:
             return jsonify({"error": "Invalid channel"}), 400
 
-        if not scheduled_for:
-            return jsonify({"error": "Scheduled time is required"}), 400
-
-        if interval_days not in [2, 3, 4, 5, 6, 7]:
-            return jsonify({"error": "Interval must be between 2 and 7 days"}), 400
-
         lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
         if not lead:
             return jsonify({"error": "Lead not found"}), 404
 
-        if channel in ["email", "both"] and not lead.get("email"):
-            return jsonify({"error": "This lead has no email address"}), 400
-
-        scheduled_dt = datetime.fromisoformat(scheduled_for)
+        now = datetime.utcnow()
 
         campaign = {
             "company_id": lead["company_id"],
@@ -478,28 +469,29 @@ def schedule_single(lead_id):
             "message": message,
             "subject": subject,
             "is_active": True,
-            "is_recurring": False,
-            "created_at": datetime.utcnow(),
-            "campaign_type": "single_lead_schedule"
+            "is_recurring": True,
+            "created_at": now
         }
 
         campaign_result = campCollection.insert_one(campaign)
-        campaign_id = campaign_result.inserted_id
+
+        # 🔥 TEST MODE (10 seconds)
+        next_followup = now + timedelta(seconds=10)
+
+        # ✅ PRODUCTION MODE (uncomment later)
+        # next_followup = now + timedelta(days=interval_days)
 
         leadCollection.update_one(
             {"_id": ObjectId(lead_id)},
             {
                 "$set": {
-                    "campaign_id": campaign_id,
-                    "next_followup_at": scheduled_dt
+                    "campaign_id": campaign_result.inserted_id,
+                    "next_followup_at": next_followup
                 }
             }
         )
 
-        return jsonify({
-            "message": "Lead scheduled successfully",
-            "campaign_id": str(campaign_id)
-        }), 200
+        return jsonify({"message": "Follow-up started"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

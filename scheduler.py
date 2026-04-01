@@ -144,7 +144,11 @@ No: {no_link}
         next_followup_at = None
 
         if is_recurring:
-            next_followup_at = now + timedelta(days=campaign["interval_days"])
+    # 🔥 TEST MODE (10 sec)
+            next_followup_at = now + timedelta(seconds=10)
+
+    # ✅ PRODUCTION MODE
+    # next_followup_at = now + timedelta(days=campaign["interval_days"])
 
         result = leadCollection.update_one(
             {"_id": lead["_id"]},
