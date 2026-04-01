@@ -437,6 +437,72 @@ No: {no_link}
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+    
+    
+@leads_bp.route("/schedule_single/<lead_id>", methods=["POST"])
+def schedule_single(lead_id):
+    try:
+        data = request.json
+        subject = data.get("subject", "Follow-up from AGE")
+        message = data.get("message", "").strip()
+        channel = data.get("channel")
+        scheduled_for = data.get("scheduled_for")
+        interval_days = data.get("interval_days", 2)
+
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+
+        if channel not in ["email", "sms", "both"]:
+            return jsonify({"error": "Invalid channel"}), 400
+
+        if not scheduled_for:
+            return jsonify({"error": "Scheduled time is required"}), 400
+
+        if interval_days not in [2, 3, 4, 5, 6, 7]:
+            return jsonify({"error": "Interval must be between 2 and 7 days"}), 400
+
+        lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
+        if not lead:
+            return jsonify({"error": "Lead not found"}), 404
+
+        if channel in ["email", "both"] and not lead.get("email"):
+            return jsonify({"error": "This lead has no email address"}), 400
+
+        scheduled_dt = datetime.fromisoformat(scheduled_for)
+
+        campaign = {
+            "company_id": lead["company_id"],
+            "channel": channel,
+            "interval_days": interval_days,
+            "message": message,
+            "subject": subject,
+            "is_active": True,
+            "is_recurring": False,
+            "created_at": datetime.utcnow(),
+            "campaign_type": "single_lead_schedule"
+        }
+
+        campaign_result = campCollection.insert_one(campaign)
+        campaign_id = campaign_result.inserted_id
+
+        leadCollection.update_one(
+            {"_id": ObjectId(lead_id)},
+            {
+                "$set": {
+                    "campaign_id": campaign_id,
+                    "next_followup_at": scheduled_dt
+                }
+            }
+        )
+
+        return jsonify({
+            "message": "Lead scheduled successfully",
+            "campaign_id": str(campaign_id)
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @leads_bp.route("/delete_company_leads/<company_id>", methods=["DELETE"])

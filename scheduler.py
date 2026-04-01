@@ -115,7 +115,6 @@ No: {no_link}
             )
             print(f"[SCHEDULER] Email sent for lead {lead_id_str}")
 
-        # SMS placeholder
         if campaign["channel"] in ["sms", "both"]:
             print(f"[SCHEDULER] SMS placeholder for lead {lead_id_str}")
 
@@ -141,13 +140,19 @@ No: {no_link}
         elif campaign["channel"] == "both":
             send_status_value = "both sent"
 
+        is_recurring = campaign.get("is_recurring", True)
+        next_followup_at = None
+
+        if is_recurring:
+            next_followup_at = now + timedelta(days=campaign["interval_days"])
+
         result = leadCollection.update_one(
             {"_id": lead["_id"]},
             {
                 "$set": {
                     "send_status": send_status_value,
                     "last_followup_sent_at": now,
-                    "next_followup_at": now + timedelta(days=campaign["interval_days"])
+                    "next_followup_at": next_followup_at
                     # "next_followup_at": now + timedelta(minutes=1)   # TEST MODE
                 },
                 "$inc": {
@@ -186,6 +191,13 @@ def process_followups():
             if not campaign_id:
                 print(f"[SCHEDULER] Skipping lead {lead['_id']} because campaign_id is missing")
                 continue
+
+            if isinstance(campaign_id, str):
+                try:
+                    campaign_id = ObjectId(campaign_id)
+                except Exception:
+                    print(f"[SCHEDULER] Invalid campaign_id for lead {lead['_id']}")
+                    continue
 
             campaign = campCollection.find_one({"_id": campaign_id})
             if not campaign or not campaign.get("is_active", False):
