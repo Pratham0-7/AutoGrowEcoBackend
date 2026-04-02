@@ -267,34 +267,123 @@ def update_lead_response(lead_id):
 
 @leads_bp.route("/respond/<lead_id>/<response>", methods=["GET"])
 def respond_to_lead(lead_id, response):
+    def html_page(title, heading, subtext, accent):
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{title}</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }}
+    .card {{
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 48px 40px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }}
+    .icon {{
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: {accent}1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 28px;
+    }}
+    h1 {{
+      font-size: 22px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 10px;
+    }}
+    p {{
+      font-size: 15px;
+      color: #64748b;
+      line-height: 1.6;
+    }}
+    .badge {{
+      display: inline-block;
+      margin-top: 28px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      letter-spacing: 0.05em;
+    }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">{heading[0]}</div>
+    <h1>{heading}</h1>
+    <p>{subtext}</p>
+    <span class="badge">Powered by AGE · AutoGrowthEco</span>
+  </div>
+</body>
+</html>"""
+
     try:
         if response not in ["yes", "no"]:
-            return jsonify({"error": "Invalid response"}), 400
+            return html_page(
+                "Invalid Link",
+                "Invalid Link",
+                "This response link is not valid. Please check the email and try again.",
+                "#ef4444"
+            ), 400
 
         result = leadCollection.update_one(
-            {"_id": ObjectId(lead_id)}, {"$set": {"response_status": response}}
+            {"_id": ObjectId(lead_id)},
+            {"$set": {
+                "response_status": response,
+                "next_followup_at": None
+            }}
         )
 
         if result.matched_count == 0:
-            return jsonify({"error": "Lead not found"}), 404
+            return html_page(
+                "Link Expired",
+                "Link Expired",
+                "This link has already been used or is no longer valid. No further action is needed.",
+                "#f59e0b"
+            ), 404
 
         if response == "yes":
-            message = "We will contact you soon."
+            return html_page(
+                "Thanks for your interest!",
+                "We'll be in touch!",
+                "Thanks for your interest. Our team will reach out to you shortly.",
+                "#22c55e"
+            ), 200
         else:
-            message = "Thank you for your time."
-
-        return f"""
-        <html>
-            <head><title>Response Received</title></head>
-            <body style="font-family: Arial; background-color: #0a0a0a; color: white; text-align: center; padding-top: 100px;">
-                <h1>Thank you!</h1>
-                <p>{message}</p>
-            </body>
-        </html>
-        """
+            return html_page(
+                "Response Received",
+                "Got it, no problem.",
+                "Thanks for letting us know. We won't reach out again. Have a great day!",
+                "#64748b"
+            ), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return html_page(
+            "Something went wrong",
+            "Something went wrong",
+            "We couldn't process your response. Please try again or contact support.",
+            "#ef4444"
+        ), 500
 
 
 @leads_bp.route("/send_bulk/<company_id>", methods=["POST"])
