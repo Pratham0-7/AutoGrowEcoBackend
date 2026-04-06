@@ -5,6 +5,7 @@ from routes.auth import auth_bp
 from routes.leads import leads_bp
 from routes.ai import ai_bp
 from routes.onboarding import onboarding_bp
+from routes.admin import admin_bp
 from scheduler import start_scheduler
 
 app = Flask(__name__)
@@ -23,13 +24,14 @@ CORS(
     },
     supports_credentials=True,
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-Admin-Pin"],
 )
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(leads_bp)
 app.register_blueprint(ai_bp)
 app.register_blueprint(onboarding_bp)
+app.register_blueprint(admin_bp)
 
 start_scheduler()
 

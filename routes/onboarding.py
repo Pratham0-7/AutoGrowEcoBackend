@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
 from db import usersCollection, compCollection
+from routes.admin import notify_new_registration
 
 onboarding_bp = Blueprint("onboarding", __name__)
 
@@ -40,17 +41,25 @@ def sync_clerk_user():
                 "onboarding_completed": existing_user.get("onboarding_completed", False)
             }), 200
 
+        now = datetime.utcnow()
         user_doc = {
             "clerk_user_id": clerk_user_id,
             "name": name or "",
             "email": email,
             "company_id": None,
             "role": "admin",
+            "plan": "free",
             "onboarding_completed": False,
-            "created_at": datetime.utcnow()
+            "created_at": now
         }
 
         result = usersCollection.insert_one(user_doc)
+
+        # Notify admin of new registration (non-blocking — ignore errors)
+        try:
+            notify_new_registration(name or "", email, now)
+        except Exception as notif_err:
+            print(f"[ONBOARDING] Admin notification failed (non-fatal): {notif_err}", flush=True)
 
         return jsonify({
             "message": "User synced successfully",
@@ -80,6 +89,13 @@ def complete_onboarding():
         sender_email = data.get("sender_email")
         sender_phone = data.get("sender_phone")
 
+        # DLT / MSG91 fields (optional — stored for future activation)
+        msg91_entity_id = data.get("msg91_entity_id", "")
+        msg91_sender_id = data.get("msg91_sender_id", "")
+        msg91_api_key = data.get("msg91_api_key", "")
+        msg91_template_id_initial = data.get("msg91_template_id_initial", "")
+        msg91_template_id_followup = data.get("msg91_template_id_followup", "")
+
         if not clerk_user_id:
             return jsonify({"error": "clerk_user_id is required"}), 400
 
@@ -106,6 +122,13 @@ def complete_onboarding():
             "name": company_name,
             "sender_email": sender_email,
             "sender_phone": sender_phone,
+            # DLT fields — inactive until activated
+            "msg91_entity_id": msg91_entity_id,
+            "msg91_sender_id": msg91_sender_id,
+            "msg91_api_key": msg91_api_key,
+            "msg91_template_id_initial": msg91_template_id_initial,
+            "msg91_template_id_followup": msg91_template_id_followup,
+            "sms_enabled": False,  # toggled to True once DLT is verified
             "created_by": str(user["_id"]),
             "created_at": datetime.utcnow()
         }
@@ -166,6 +189,7 @@ def get_me(clerk_user_id):
             "sender_email": sender_email,
             "sender_phone": sender_phone,
             "role": user.get("role", "admin"),
+            "plan": user.get("plan", "free"),
             "onboarding_completed": user.get("onboarding_completed", False)
         }), 200
 

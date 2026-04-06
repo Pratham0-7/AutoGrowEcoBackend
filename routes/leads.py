@@ -6,6 +6,7 @@ from bson import ObjectId
 from datetime import datetime, timedelta
 import boto3
 from botocore.exceptions import ClientError
+from services.msg91 import send_sms_msg91
 
 from db import (
     leadCollection,
@@ -475,9 +476,20 @@ No: {no_link}
                         html_body=html_body,
                     )
 
-                # SMS placeholder for now
+                # MSG91 SMS (active only when company has DLT configured + sms_enabled)
                 if send_type in ["sms", "both"]:
-                    pass
+                    sms_enabled = company.get("sms_enabled", False)
+                    if sms_enabled and lead.get("phone"):
+                        template_id = company.get("msg91_template_id_initial", "")
+                        auth_key = company.get("msg91_api_key", "")
+                        send_sms_msg91(
+                            mobile=lead["phone"],
+                            template_id=template_id,
+                            variables={"name": lead.get("name", "there")},
+                            auth_key=auth_key or None,
+                        )
+                    else:
+                        print(f"[LEADS] SMS skipped for lead {lead_id_str} — sms_enabled={sms_enabled}", flush=True)
 
                 msgCollection.insert_one(
                     {

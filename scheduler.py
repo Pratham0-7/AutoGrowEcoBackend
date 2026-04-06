@@ -5,6 +5,7 @@ from db import leadCollection, campCollection, msgCollection, compCollection
 import boto3
 import os
 from botocore.exceptions import ClientError
+from services.msg91 import send_sms_msg91
 
 scheduler = BackgroundScheduler()
 
@@ -116,7 +117,20 @@ No: {no_link}
             print(f"[SCHEDULER] Email sent for lead {lead_id_str}")
 
         if campaign["channel"] in ["sms", "both"]:
-            print(f"[SCHEDULER] SMS placeholder for lead {lead_id_str}")
+            company = compCollection.find_one({"_id": ObjectId(lead["company_id"])}) if lead.get("company_id") else None
+            sms_enabled = company.get("sms_enabled", False) if company else False
+            if sms_enabled and lead.get("phone"):
+                template_id = company.get("msg91_template_id_followup") or company.get("msg91_template_id_initial", "")
+                auth_key = company.get("msg91_api_key", "") or None
+                send_sms_msg91(
+                    mobile=lead["phone"],
+                    template_id=template_id,
+                    variables={"name": lead.get("name", "there")},
+                    auth_key=auth_key,
+                )
+                print(f"[SCHEDULER] SMS sent via MSG91 for lead {lead_id_str}")
+            else:
+                print(f"[SCHEDULER] SMS skipped for lead {lead_id_str} — sms_enabled={sms_enabled}")
 
         msgCollection.insert_one({
             "lead_id": lead_id_str,
