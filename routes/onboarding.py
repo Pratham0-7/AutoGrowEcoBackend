@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from db import usersCollection, compCollection
 from routes.admin import notify_new_registration
 
@@ -53,7 +54,28 @@ def sync_clerk_user():
             "created_at": now
         }
 
-        result = usersCollection.insert_one(user_doc)
+        try:
+            result = usersCollection.insert_one(user_doc)
+        except DuplicateKeyError:
+            # Unique index caught a race condition — just return the existing record
+            existing_user = usersCollection.find_one({"clerk_user_id": clerk_user_id})
+            if existing_user:
+                company_name = ""
+                if existing_user.get("company_id"):
+                    company = compCollection.find_one({"_id": ObjectId(existing_user["company_id"])})
+                    if company:
+                        company_name = company.get("name", "")
+                return jsonify({
+                    "message": "User already synced",
+                    "user_id": str(existing_user["_id"]),
+                    "clerk_user_id": existing_user["clerk_user_id"],
+                    "name": existing_user.get("name", ""),
+                    "email": existing_user.get("email", ""),
+                    "company_id": existing_user.get("company_id"),
+                    "company_name": company_name,
+                    "role": existing_user.get("role", "admin"),
+                    "onboarding_completed": existing_user.get("onboarding_completed", False)
+                }), 200
 
         # Notify admin of new registration (non-blocking — ignore errors)
         try:
@@ -133,9 +155,18 @@ def complete_onboarding():
             "created_at": datetime.utcnow()
         }
 
-        company_result = compCollection.insert_one(company_doc)
-        company_id = str(company_result.inserted_id)
-        print("[ONBOARDING] created company_id:", company_id, flush=True)
+        try:
+            company_result = compCollection.insert_one(company_doc)
+            company_id = str(company_result.inserted_id)
+        except DuplicateKeyError:
+            # Company with this name already exists — reuse it
+            existing_comp = compCollection.find_one({"name": company_name})
+            if existing_comp:
+                company_id = str(existing_comp["_id"])
+                print("[ONBOARDING] Reusing existing company:", company_id, flush=True)
+            else:
+                raise
+        print("[ONBOARDING] company_id:", company_id, flush=True)
 
         usersCollection.update_one(
             {"clerk_user_id": user["clerk_user_id"]},

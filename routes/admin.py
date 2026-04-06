@@ -4,7 +4,7 @@ from botocore.exceptions import ClientError
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime, timedelta
-from db import usersCollection, compCollection, leadCollection, campCollection
+from db import usersCollection, compCollection, leadCollection, campCollection, ensure_indexes
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -18,18 +18,16 @@ AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
 # ---------------------------------------------------------------------------
 
 def _check_pin() -> bool:
-    """Return True if the request carries the correct admin PIN."""
     if not ADMIN_PIN:
         return False
     return request.headers.get("X-Admin-Pin", "") == ADMIN_PIN
 
 
 # ---------------------------------------------------------------------------
-# Email helper (re-uses the project's SES setup)
+# Email helper
 # ---------------------------------------------------------------------------
 
 def _send_admin_email(subject: str, body_html: str, body_text: str = ""):
-    """Send a notification email to ADMIN_EMAIL via SES."""
     if not ADMIN_EMAIL:
         return
     try:
@@ -51,7 +49,6 @@ def _send_admin_email(subject: str, body_html: str, body_text: str = ""):
 
 
 def notify_new_registration(name: str, email: str, created_at: datetime):
-    """Fire-and-forget admin notification for a fresh signup."""
     subject = f"New AGE Signup — {name or email}"
     ts = created_at.strftime("%d %b %Y, %H:%M UTC")
     body_html = f"""
@@ -85,16 +82,17 @@ def stats():
         return jsonify({"error": "Unauthorized"}), 401
 
     try:
-        total_users = usersCollection.count_documents({})
+        distinct_users = usersCollection.distinct("clerk_user_id")
+        total_users = len(distinct_users)
         total_companies = compCollection.count_documents({})
-        completed = usersCollection.count_documents({"onboarding_completed": True})
+        completed = len(usersCollection.distinct("clerk_user_id", {"onboarding_completed": True}))
 
         now = datetime.utcnow()
         week_ago = now - timedelta(days=7)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        new_today = usersCollection.count_documents({"created_at": {"$gte": today_start}})
-        new_this_week = usersCollection.count_documents({"created_at": {"$gte": week_ago}})
+        new_today = len(usersCollection.distinct("clerk_user_id", {"created_at": {"$gte": today_start}}))
+        new_this_week = len(usersCollection.distinct("clerk_user_id", {"created_at": {"$gte": week_ago}}))
 
         return jsonify({
             "total_users": total_users,
@@ -111,14 +109,22 @@ def stats():
 
 @admin_bp.route("/users", methods=["GET"])
 def list_users():
-    """Return all registered users with their company info."""
     if not _check_pin():
         return jsonify({"error": "Unauthorized"}), 401
 
     try:
-        users = list(usersCollection.find({}).sort("created_at", -1))
-        result = []
+        all_users = list(usersCollection.find({}).sort("created_at", -1))
 
+        # Deduplicate by clerk_user_id — keep the most recent record (has created_at + all fields).
+        seen = set()
+        users = []
+        for u in all_users:
+            cid = u.get("clerk_user_id", str(u["_id"]))
+            if cid not in seen:
+                seen.add(cid)
+                users.append(u)
+
+        result = []
         for u in users:
             company_name = ""
             sender_phone = ""
@@ -161,10 +167,6 @@ def list_users():
 
 @admin_bp.route("/notifications/check", methods=["GET"])
 def check_notifications():
-    """
-    Return users created after `since` (ISO timestamp query param).
-    Frontend polls this every 30s to drive the notification bell.
-    """
     if not _check_pin():
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -192,4 +194,108 @@ def check_notifications():
 
     except Exception as exc:
         print(f"[ADMIN][NOTIF ERROR] {exc}", flush=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@admin_bp.route("/cleanup_duplicates", methods=["POST"])
+def cleanup_duplicates():
+    """
+    One-time cleanup: removes duplicate user and company records created by
+    the old auth.py routes (which lacked created_at and proper fields).
+    After cleanup, recreates unique indexes so duplicates can't happen again.
+
+    Safe to run multiple times — idempotent.
+    """
+    if not _check_pin():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    users_deleted = 0
+    companies_deleted = 0
+    report = []
+
+    try:
+        # ── 1. Deduplicate users by clerk_user_id ────────────────────────────
+        # For each clerk_user_id, keep the "best" record:
+        #   Priority: has created_at > has onboarding_completed=True > oldest _id
+        all_users = list(usersCollection.find({}).sort("_id", 1))
+        groups: dict[str, list] = {}
+        for u in all_users:
+            cid = u.get("clerk_user_id")
+            if not cid:
+                continue
+            groups.setdefault(cid, []).append(u)
+
+        for cid, dupes in groups.items():
+            if len(dupes) <= 1:
+                continue
+
+            # Score each record — higher is better
+            def score(u):
+                return (
+                    1 if u.get("created_at") else 0,
+                    1 if u.get("onboarding_completed") else 0,
+                    1 if u.get("plan") else 0,
+                )
+
+            dupes.sort(key=score, reverse=True)
+            keep = dupes[0]
+            to_delete = [d["_id"] for d in dupes[1:]]
+
+            usersCollection.delete_many({"_id": {"$in": to_delete}})
+            users_deleted += len(to_delete)
+            report.append({
+                "clerk_user_id": cid,
+                "kept": str(keep["_id"]),
+                "deleted": [str(i) for i in to_delete],
+            })
+
+        # ── 2. Deduplicate companies by name ─────────────────────────────────
+        # Keep the record that has the most fields set (onboarding.py-created ones
+        # have msg91 fields, created_by, sms_enabled, etc.)
+        all_comps = list(compCollection.find({}).sort("_id", 1))
+        comp_groups: dict[str, list] = {}
+        for c in all_comps:
+            name = (c.get("name") or "").strip().lower()
+            if not name:
+                continue
+            comp_groups.setdefault(name, []).append(c)
+
+        for name, dupes in comp_groups.items():
+            if len(dupes) <= 1:
+                continue
+
+            def comp_score(c):
+                return (
+                    1 if c.get("created_by") else 0,
+                    1 if c.get("sms_enabled") is not None else 0,
+                    1 if c.get("created_at") else 0,
+                )
+
+            dupes.sort(key=comp_score, reverse=True)
+            keep = dupes[0]
+            to_delete_ids = [d["_id"] for d in dupes[1:]]
+
+            # Re-point any users that reference a deleted company to the kept one
+            for deleted_comp in dupes[1:]:
+                usersCollection.update_many(
+                    {"company_id": str(deleted_comp["_id"])},
+                    {"$set": {"company_id": str(keep["_id"])}},
+                )
+
+            compCollection.delete_many({"_id": {"$in": to_delete_ids}})
+            companies_deleted += len(to_delete_ids)
+
+        # ── 3. Re-run index creation now that duplicates are gone ─────────────
+        index_errors = ensure_indexes()
+
+        return jsonify({
+            "message": "Cleanup complete",
+            "users_deleted": users_deleted,
+            "companies_deleted": companies_deleted,
+            "index_errors": index_errors,
+            "detail": report,
+        }), 200
+
+    except Exception as exc:
+        print(f"[ADMIN][CLEANUP ERROR] {exc}", flush=True)
         return jsonify({"error": str(exc)}), 500

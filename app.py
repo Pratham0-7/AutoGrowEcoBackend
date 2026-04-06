@@ -1,7 +1,6 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 
-from routes.auth import auth_bp
 from routes.leads import leads_bp
 from routes.ai import ai_bp
 from routes.onboarding import onboarding_bp
@@ -27,7 +26,6 @@ CORS(
     allow_headers=["Content-Type", "Authorization", "X-Admin-Pin"],
 )
 
-app.register_blueprint(auth_bp)
 app.register_blueprint(leads_bp)
 app.register_blueprint(ai_bp)
 app.register_blueprint(onboarding_bp)
