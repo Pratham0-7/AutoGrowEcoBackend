@@ -80,114 +80,100 @@ def send_followup(lead, campaign):
     now = datetime.utcnow()
     lead_id_str = str(lead["_id"])
 
-    try:
-        print(f"[SCHEDULER] Sending follow-up for lead {lead_id_str}")
+    print(f"[SCHEDULER] Sending follow-up for lead {lead_id_str}")
 
-        final_message = render_message(campaign.get("message", ""), lead)
-        subject = campaign.get("subject", "Follow-up from AGE")
-        yes_link, no_link = build_response_links(lead_id_str)
+    final_message = render_message(campaign.get("message", ""), lead)
+    subject = campaign.get("subject", "Follow-up from AGE")
+    yes_link, no_link = build_response_links(lead_id_str)
 
-        text_body = f"""{final_message}
+    text_body = f"""{final_message}
 
 Yes: {yes_link}
 No: {no_link}
 """
 
-        html_body = build_email_html(final_message, yes_link, no_link)
+    html_body = build_email_html(final_message, yes_link, no_link)
 
-        company = compCollection.find_one({"_id": ObjectId(lead["company_id"])})
-        sender_email = company.get("sender_email", "") if company else ""
+    company = compCollection.find_one({"_id": ObjectId(lead["company_id"])})
+    sender_email = company.get("sender_email", "") if company else ""
 
-        if campaign["channel"] in ["email", "both"]:
-            if not sender_email:
-                print(f"[SCHEDULER] Missing sender_email for company {lead['company_id']}")
-                return
+    if campaign["channel"] in ["email", "both"]:
+        if not sender_email:
+            raise ValueError(f"Sender email not configured for company {lead['company_id']}")
 
-            if not lead.get("email"):
-                print(f"[SCHEDULER] Missing recipient email for lead {lead_id_str}")
-                return
+        if not lead.get("email"):
+            raise ValueError(f"Missing recipient email for lead {lead_id_str}")
 
-            send_email_ses(
-                to_email=lead["email"],
-                subject=subject,
-                body_text=text_body,
-                sender_email=sender_email,
-                html_body=html_body
+        send_email_ses(
+            to_email=lead["email"],
+            subject=subject,
+            body_text=text_body,
+            sender_email=sender_email,
+            html_body=html_body
+        )
+        print(f"[SCHEDULER] Email sent for lead {lead_id_str}")
+
+    if campaign["channel"] in ["sms", "both"]:
+        sms_enabled = company.get("sms_enabled", False) if company else False
+        if sms_enabled and lead.get("phone"):
+            template_id = company.get("msg91_template_id_followup") or company.get("msg91_template_id_initial", "")
+            auth_key = company.get("msg91_api_key", "") or None
+            send_sms_msg91(
+                mobile=lead["phone"],
+                template_id=template_id,
+                variables={"name": lead.get("name", "there")},
+                auth_key=auth_key,
             )
-            print(f"[SCHEDULER] Email sent for lead {lead_id_str}")
+            print(f"[SCHEDULER] SMS sent via MSG91 for lead {lead_id_str}")
+        else:
+            print(f"[SCHEDULER] SMS skipped for lead {lead_id_str} — sms_enabled={sms_enabled}")
 
-        if campaign["channel"] in ["sms", "both"]:
-            company = compCollection.find_one({"_id": ObjectId(lead["company_id"])}) if lead.get("company_id") else None
-            sms_enabled = company.get("sms_enabled", False) if company else False
-            if sms_enabled and lead.get("phone"):
-                template_id = company.get("msg91_template_id_followup") or company.get("msg91_template_id_initial", "")
-                auth_key = company.get("msg91_api_key", "") or None
-                send_sms_msg91(
-                    mobile=lead["phone"],
-                    template_id=template_id,
-                    variables={"name": lead.get("name", "there")},
-                    auth_key=auth_key,
-                )
-                print(f"[SCHEDULER] SMS sent via MSG91 for lead {lead_id_str}")
-            else:
-                print(f"[SCHEDULER] SMS skipped for lead {lead_id_str} — sms_enabled={sms_enabled}")
+    msgCollection.insert_one({
+        "lead_id": lead_id_str,
+        "company_id": lead["company_id"],
+        "channel": campaign["channel"],
+        "message": final_message,
+        "subject": subject,
+        "yes_link": yes_link,
+        "no_link": no_link,
+        "sent_at": now,
+        "status": "sent",
+        "message_type": "followup"
+    })
+    print(f"[SCHEDULER] Message log inserted for lead {lead_id_str}")
 
-        msgCollection.insert_one({
-            "lead_id": lead_id_str,
-            "company_id": lead["company_id"],
-            "channel": campaign["channel"],
-            "message": final_message,
-            "subject": subject,
-            "yes_link": yes_link,
-            "no_link": no_link,
-            "sent_at": now,
-            "status": "sent",
-            "message_type": "followup"
-        })
-        print(f"[SCHEDULER] Message log inserted for lead {lead_id_str}")
+    send_status_value = "not sent"
+    if campaign["channel"] == "email":
+        send_status_value = "email sent"
+    elif campaign["channel"] == "sms":
+        send_status_value = "sms sent"
+    elif campaign["channel"] == "both":
+        send_status_value = "both sent"
 
-        send_status_value = "not sent"
-        if campaign["channel"] == "email":
-            send_status_value = "email sent"
-        elif campaign["channel"] == "sms":
-            send_status_value = "sms sent"
-        elif campaign["channel"] == "both":
-            send_status_value = "both sent"
+    is_recurring = campaign.get("is_recurring", True)
+    next_followup_at = None
 
-        is_recurring = campaign.get("is_recurring", True)
-        next_followup_at = None
+    if is_recurring:
+        next_followup_at = now + timedelta(days=campaign["interval_days"])
 
-        if is_recurring:
-    # 🔥 TEST MODE (10 sec)
-            next_followup_at = now + timedelta(seconds=10)
-
-    # ✅ PRODUCTION MODE
-    # next_followup_at = now + timedelta(days=campaign["interval_days"])
-
-        result = leadCollection.update_one(
-            {"_id": lead["_id"]},
-            {
-                "$set": {
-                    "send_status": send_status_value,
-                    "last_followup_sent_at": now,
-                    "next_followup_at": next_followup_at
-                    # "next_followup_at": now + timedelta(minutes=1)   # TEST MODE
-                },
-                "$inc": {
-                    "followup_count": 1
-                }
+    result = leadCollection.update_one(
+        {"_id": lead["_id"]},
+        {
+            "$set": {
+                "send_status": send_status_value,
+                "last_followup_sent_at": now,
+                "next_followup_at": next_followup_at,
+            },
+            "$inc": {
+                "followup_count": 1
             }
-        )
+        }
+    )
 
-        print(
-            f"[SCHEDULER] Lead update result for {lead_id_str}: "
-            f"matched={result.matched_count}, modified={result.modified_count}"
-        )
-
-    except ClientError as e:
-        print(f"[SCHEDULER][AWS ERROR] Lead {lead_id_str}: {str(e)}")
-    except Exception as e:
-        print(f"[SCHEDULER][ERROR] Lead {lead_id_str}: {str(e)}")
+    print(
+        f"[SCHEDULER] Lead update result for {lead_id_str}: "
+        f"matched={result.matched_count}, modified={result.modified_count}"
+    )
 
 
 def process_followups():
@@ -222,7 +208,12 @@ def process_followups():
                 print(f"[SCHEDULER] Skipping lead {lead['_id']} because campaign inactive/missing")
                 continue
 
-            send_followup(lead, campaign)
+            try:
+                send_followup(lead, campaign)
+            except ClientError as e:
+                print(f"[SCHEDULER][AWS ERROR] Lead {lead['_id']}: {str(e)}")
+            except Exception as e:
+                print(f"[SCHEDULER][ERROR] Lead {lead['_id']}: {str(e)}")
 
     except Exception as e:
         print(f"[SCHEDULER][PROCESS ERROR] {str(e)}")

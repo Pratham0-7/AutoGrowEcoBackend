@@ -15,6 +15,7 @@ from db import (
     usersCollection,
     compCollection,
 )
+from scheduler import send_followup
 
 leads_bp = Blueprint("leads", __name__)
 
@@ -595,23 +596,21 @@ def start_followup(lead_id):
         }
 
         campaign_result = campCollection.insert_one(campaign)
-
-        # TEST MODE
-        # next_followup = now + timedelta(seconds=10)
-
-        # PRODUCTION MODE
-        next_followup = now + timedelta(days=interval_days)
+        campaign["_id"] = campaign_result.inserted_id
 
         leadCollection.update_one(
             {"_id": ObjectId(lead_id)},
             {
                 "$set": {
                     "campaign_id": campaign_result.inserted_id,
-                    "next_followup_at": next_followup,
                     "response_status": "pending",
                 }
             },
         )
+
+        # Re-fetch with campaign_id set, then send first follow-up immediately
+        updated_lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
+        send_followup(updated_lead, campaign)
 
         return jsonify({"message": "Follow-up started"}), 200
 
