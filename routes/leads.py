@@ -235,6 +235,9 @@ def get_leads(company_id):
                     "followup_count": lead.get("followup_count", 0),
                     "last_followup_sent_at": lead.get("last_followup_sent_at"),
                     "next_followup_at": lead.get("next_followup_at"),
+                    "is_individual_followup": lead.get("is_individual_followup", False),
+                    "pref_channel": lead.get("pref_channel", "email"),
+                    "pref_interval_days": lead.get("pref_interval_days", 2),
                 }
             )
 
@@ -386,6 +389,26 @@ def respond_to_lead(lead_id, response):
             "We couldn't process your response. Please try again or contact support.",
             "#ef4444"
         ), 500
+
+
+@leads_bp.route("/lead_schedule/<lead_id>", methods=["PATCH"])
+def save_lead_schedule(lead_id):
+    """Persist a lead's preferred channel/gap and mark them as individual."""
+    try:
+        data = request.json or {}
+        channel = data.get("channel")
+        interval_days = data.get("interval_days")
+
+        updates = {"is_individual_followup": True}
+        if channel in ["email", "sms", "both"]:
+            updates["pref_channel"] = channel
+        if interval_days in [2, 3, 4, 5, 6, 7]:
+            updates["pref_interval_days"] = interval_days
+
+        leadCollection.update_one({"_id": ObjectId(lead_id)}, {"$set": updates})
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @leads_bp.route("/send_bulk/<company_id>", methods=["POST"])
