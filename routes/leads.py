@@ -432,7 +432,11 @@ def send_bulk(company_id):
         campaign_result = campCollection.insert_one(campaign)
         campaign_id = campaign_result.inserted_id
 
-        leads = list(leadCollection.find({"company_id": company_id}))
+        # Skip leads that have an active individual follow-up — they take priority
+        leads = list(leadCollection.find({
+            "company_id": company_id,
+            "is_individual_followup": {"$ne": True},
+        }))
         count = 0
         failed = []
 
@@ -598,19 +602,32 @@ def start_followup(lead_id):
         campaign_result = campCollection.insert_one(campaign)
         campaign["_id"] = campaign_result.inserted_id
 
+        already_contacted = (lead.get("followup_count") or 0) > 0
+
         leadCollection.update_one(
             {"_id": ObjectId(lead_id)},
             {
                 "$set": {
                     "campaign_id": campaign_result.inserted_id,
                     "response_status": "pending",
+                    "is_individual_followup": True,
                 }
             },
         )
 
-        # Re-fetch with campaign_id set, then send first follow-up immediately
         updated_lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
-        send_followup(updated_lead, campaign)
+
+        if already_contacted:
+            # Lead was already emailed (e.g. via bulk) — don't double-send.
+            # Just reschedule the next follow-up with the new individual timing.
+            next_followup = now + timedelta(days=interval_days)
+            leadCollection.update_one(
+                {"_id": ObjectId(lead_id)},
+                {"$set": {"next_followup_at": next_followup}},
+            )
+        else:
+            # First contact — send immediately
+            send_followup(updated_lead, campaign)
 
         return jsonify({"message": "Follow-up started"}), 200
 

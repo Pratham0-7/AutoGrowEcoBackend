@@ -5,6 +5,7 @@ from routes.leads import leads_bp
 from routes.ai import ai_bp
 from routes.onboarding import onboarding_bp
 from routes.admin import admin_bp
+from routes.webhooks import webhooks_bp
 from scheduler import start_scheduler
 
 app = Flask(__name__)
@@ -30,6 +31,7 @@ app.register_blueprint(leads_bp)
 app.register_blueprint(ai_bp)
 app.register_blueprint(onboarding_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(webhooks_bp)
 
 start_scheduler()
 
