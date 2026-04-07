@@ -4,7 +4,7 @@ from botocore.exceptions import ClientError
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime, timedelta
-from db import usersCollection, compCollection, leadCollection, campCollection, ensure_indexes
+from db import usersCollection, compCollection, leadCollection, campCollection, msgCollection, ensure_indexes
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -194,6 +194,65 @@ def check_notifications():
 
     except Exception as exc:
         print(f"[ADMIN][NOTIF ERROR] {exc}", flush=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@admin_bp.route("/delete_user/<user_id>", methods=["DELETE"])
+def delete_user(user_id):
+    """
+    Cascade-delete a user and everything that belongs to them:
+      user → company → leads → messages → campaigns
+    """
+    if not _check_pin():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        user = usersCollection.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        company_id = user.get("company_id")
+        leads_deleted = messages_deleted = campaigns_deleted = company_deleted = 0
+
+        if company_id:
+            # Collect all lead IDs for this company so we can delete their messages
+            lead_ids = [str(l["_id"]) for l in leadCollection.find(
+                {"company_id": company_id}, {"_id": 1}
+            )]
+
+            if lead_ids:
+                msg_result = msgCollection.delete_many({"lead_id": {"$in": lead_ids}})
+                messages_deleted = msg_result.deleted_count
+
+            leads_result = leadCollection.delete_many({"company_id": company_id})
+            leads_deleted = leads_result.deleted_count
+
+            camp_result = campCollection.delete_many({"company_id": company_id})
+            campaigns_deleted = camp_result.deleted_count
+
+            compCollection.delete_one({"_id": ObjectId(company_id)})
+            company_deleted = 1
+
+        usersCollection.delete_one({"_id": ObjectId(user_id)})
+
+        print(
+            f"[ADMIN] Deleted user {user_id} ({user.get('email')}) — "
+            f"company={company_deleted}, leads={leads_deleted}, "
+            f"messages={messages_deleted}, campaigns={campaigns_deleted}",
+            flush=True,
+        )
+
+        return jsonify({
+            "message": "Account deleted",
+            "user_deleted": 1,
+            "company_deleted": company_deleted,
+            "leads_deleted": leads_deleted,
+            "messages_deleted": messages_deleted,
+            "campaigns_deleted": campaigns_deleted,
+        }), 200
+
+    except Exception as exc:
+        print(f"[ADMIN][DELETE ERROR] {exc}", flush=True)
         return jsonify({"error": str(exc)}), 500
 
 
