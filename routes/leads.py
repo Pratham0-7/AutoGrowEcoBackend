@@ -393,19 +393,35 @@ def respond_to_lead(lead_id, response):
 
 @leads_bp.route("/lead_schedule/<lead_id>", methods=["PATCH"])
 def save_lead_schedule(lead_id):
-    """Persist a lead's preferred channel/gap and mark them as individual."""
+    """Persist a lead's preferred channel/gap without touching the individual flag."""
     try:
         data = request.json or {}
         channel = data.get("channel")
         interval_days = data.get("interval_days")
 
-        updates = {"is_individual_followup": True}
+        updates = {}
         if channel in ["email", "sms", "both"]:
             updates["pref_channel"] = channel
         if interval_days in [2, 3, 4, 5, 6, 7]:
             updates["pref_interval_days"] = interval_days
 
-        leadCollection.update_one({"_id": ObjectId(lead_id)}, {"$set": updates})
+        if updates:
+            leadCollection.update_one({"_id": ObjectId(lead_id)}, {"$set": updates})
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route("/mark_individual/<lead_id>", methods=["PATCH"])
+def mark_individual(lead_id):
+    """Explicitly add or remove a lead from the individual follow-up pool."""
+    try:
+        data = request.json or {}
+        value = bool(data.get("individual", True))
+        leadCollection.update_one(
+            {"_id": ObjectId(lead_id)},
+            {"$set": {"is_individual_followup": value}},
+        )
         return jsonify({"ok": True}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
