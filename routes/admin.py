@@ -147,10 +147,13 @@ def list_users():
                 "clerk_user_id": u.get("clerk_user_id", ""),
                 "name": u.get("name", ""),
                 "email": u.get("email", ""),
-                "company_name": company_name,
+                "phone": u.get("phone", ""),
+                "company_name": company_name or u.get("company_name", ""),
                 "company_id": u.get("company_id"),
                 "sender_phone": sender_phone,
                 "role": u.get("role", "admin"),
+                "details_submitted": u.get("details_submitted", False),
+                "approved": u.get("approved", False),
                 "onboarding_completed": u.get("onboarding_completed", False),
                 "msg91_configured": msg91_configured,
                 "lead_count": lead_count,
@@ -253,6 +256,28 @@ def delete_user(user_id):
 
     except Exception as exc:
         print(f"[ADMIN][DELETE ERROR] {exc}", flush=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@admin_bp.route("/approve_user/<user_id>", methods=["POST"])
+def approve_user(user_id):
+    if not _check_pin():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        user = usersCollection.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        usersCollection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"approved": True}}
+        )
+        print(f"[ADMIN] Approved user {user_id} ({user.get('email')})", flush=True)
+        return jsonify({"message": "User approved", "user_id": user_id, "approved": True}), 200
+
+    except Exception as exc:
+        print(f"[ADMIN][APPROVE ERROR] {exc}", flush=True)
         return jsonify({"error": str(exc)}), 500
 
 

@@ -36,9 +36,12 @@ def sync_clerk_user():
                 "clerk_user_id": existing_user["clerk_user_id"],
                 "name": existing_user.get("name", ""),
                 "email": existing_user.get("email", ""),
+                "phone": existing_user.get("phone", ""),
                 "company_id": existing_user.get("company_id"),
                 "company_name": company_name,
                 "role": existing_user.get("role", "admin"),
+                "details_submitted": existing_user.get("details_submitted", False),
+                "approved": existing_user.get("approved", False),
                 "onboarding_completed": existing_user.get("onboarding_completed", False)
             }), 200
 
@@ -47,9 +50,12 @@ def sync_clerk_user():
             "clerk_user_id": clerk_user_id,
             "name": name or "",
             "email": email,
+            "phone": "",
             "company_id": None,
             "role": "admin",
             "plan": "free",
+            "details_submitted": False,
+            "approved": False,
             "onboarding_completed": False,
             "created_at": now
         }
@@ -71,9 +77,12 @@ def sync_clerk_user():
                     "clerk_user_id": existing_user["clerk_user_id"],
                     "name": existing_user.get("name", ""),
                     "email": existing_user.get("email", ""),
+                    "phone": existing_user.get("phone", ""),
                     "company_id": existing_user.get("company_id"),
                     "company_name": company_name,
                     "role": existing_user.get("role", "admin"),
+                    "details_submitted": existing_user.get("details_submitted", False),
+                    "approved": existing_user.get("approved", False),
                     "onboarding_completed": existing_user.get("onboarding_completed", False)
                 }), 200
 
@@ -89,9 +98,12 @@ def sync_clerk_user():
             "clerk_user_id": clerk_user_id,
             "name": user_doc["name"],
             "email": user_doc["email"],
+            "phone": "",
             "company_id": None,
             "company_name": "",
             "role": "admin",
+            "details_submitted": False,
+            "approved": False,
             "onboarding_completed": False
         }), 201
 
@@ -189,6 +201,45 @@ def complete_onboarding():
 
     except Exception as e:
         print("[ONBOARDING][COMPLETE ERROR]", str(e), flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@onboarding_bp.route("/submit_details", methods=["POST"])
+def submit_details():
+    try:
+        data = request.json or {}
+        clerk_user_id = data.get("clerk_user_id")
+        name = data.get("name", "").strip()
+        company_name = data.get("company_name", "").strip()
+        phone = data.get("phone", "").strip()
+
+        if not clerk_user_id:
+            return jsonify({"error": "clerk_user_id is required"}), 400
+        if not company_name or not phone:
+            return jsonify({"error": "company_name and phone are required"}), 400
+
+        user = usersCollection.find_one({"clerk_user_id": clerk_user_id})
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        usersCollection.update_one(
+            {"clerk_user_id": clerk_user_id},
+            {"$set": {
+                "name": name or user.get("name", ""),
+                "company_name": company_name,
+                "phone": phone,
+                "details_submitted": True,
+            }}
+        )
+
+        return jsonify({
+            "message": "Details submitted successfully",
+            "details_submitted": True,
+            "approved": user.get("approved", False),
+        }), 200
+
+    except Exception as e:
+        print("[ONBOARDING][SUBMIT_DETAILS ERROR]", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
 
