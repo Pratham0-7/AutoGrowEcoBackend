@@ -560,9 +560,9 @@ No: {no_link}
                             "campaign_id": campaign_id,
                             "followup_count": 1,
                             "last_followup_sent_at": now,
-                            # "next_followup_at": now
-                            # + timedelta(days=campaign["interval_days"]),
-                            "next_followup_at": now + timedelta(seconds=10),  # for testing, set next follow-up to 10 seconds later
+                            "next_followup_at": now
+                            + timedelta(days=campaign["interval_days"]),
+                            # "next_followup_at": now + timedelta(seconds=10),  
                         }
                     },
                 )
@@ -647,8 +647,8 @@ def start_followup(lead_id):
         already_contacted = (lead.get("followup_count") or 0) > 0
 
         if already_contacted:
-            # next_followup = now + timedelta(days=interval_days)
-            next_followup = now + timedelta(seconds=10)
+            next_followup = now + timedelta(days=interval_days)
+            # next_followup = now + timedelta(seconds=10)
 
             leadCollection.update_one(
                 {"_id": ObjectId(lead_id)},
