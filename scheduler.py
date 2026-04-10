@@ -153,8 +153,13 @@ No: {no_link}
     is_recurring = campaign.get("is_recurring", True)
     next_followup_at = None
 
+    interval_days = campaign.get("interval_days", 2)
+    if lead.get("is_individual_followup") and lead.get("pref_interval_days"):
+        interval_days = lead.get("pref_interval_days")
+
     if is_recurring:
-        next_followup_at = now + timedelta(days=campaign["interval_days"])
+        # next_followup_at = now + timedelta(days=interval_days)
+        next_followup_at = now + timedelta(seconds=10)
 
     result = leadCollection.update_one(
         {"_id": lead["_id"]},
@@ -224,7 +229,8 @@ def start_scheduler():
         scheduler.add_job(
             process_followups,
             "interval",
-            minutes=1,
+            # minutes=1,
+            seconds=5,
             id="followup_scheduler",
             replace_existing=True
         )

@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 import boto3
 from botocore.exceptions import ClientError
 from services.msg91 import send_sms_msg91
+import re
+import requests as http_requests
 
 from db import (
     leadCollection,
@@ -558,9 +560,9 @@ No: {no_link}
                             "campaign_id": campaign_id,
                             "followup_count": 1,
                             "last_followup_sent_at": now,
-                            "next_followup_at": now
-                            + timedelta(days=campaign["interval_days"]),
-                            # "next_followup_at": now + timedelta(minutes=1)
+                            # "next_followup_at": now
+                            # + timedelta(days=campaign["interval_days"]),
+                            "next_followup_at": now + timedelta(seconds=10),  # for testing, set next follow-up to 10 seconds later
                         }
                     },
                 )
@@ -602,7 +604,7 @@ No: {no_link}
 @leads_bp.route("/start_followup/<lead_id>", methods=["POST"])
 def start_followup(lead_id):
     try:
-        data = request.json
+        data = request.json or {}
 
         subject = data.get("subject", "Follow-up from AGE")
         message = data.get("message", "").strip()
@@ -639,40 +641,50 @@ def start_followup(lead_id):
         }
 
         campaign_result = campCollection.insert_one(campaign)
-        campaign["_id"] = campaign_result.inserted_id
+        campaign_id = campaign_result.inserted_id
+        campaign["_id"] = campaign_id
 
         already_contacted = (lead.get("followup_count") or 0) > 0
 
-        leadCollection.update_one(
-            {"_id": ObjectId(lead_id)},
-            {
-                "$set": {
-                    "campaign_id": campaign_result.inserted_id,
-                    "response_status": "pending",
-                    "is_individual_followup": True,
-                }
-            },
-        )
-
-        updated_lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
-
         if already_contacted:
-            # Lead was already emailed (e.g. via bulk) — don't double-send.
-            # Just reschedule the next follow-up with the new individual timing.
-            next_followup = now + timedelta(days=interval_days)
+            # next_followup = now + timedelta(days=interval_days)
+            next_followup = now + timedelta(seconds=10)
+
             leadCollection.update_one(
                 {"_id": ObjectId(lead_id)},
-                {"$set": {"next_followup_at": next_followup}},
+                {
+                    "$set": {
+                        "campaign_id": campaign_id,
+                        "response_status": "pending",
+                        "is_individual_followup": True,
+                        "pref_channel": channel,
+                        "pref_interval_days": interval_days,
+                        "last_followup_sent_at": lead.get("last_followup_sent_at") or now,
+                        "next_followup_at": next_followup,
+                    }
+                },
             )
         else:
-            # First contact — send immediately
+            leadCollection.update_one(
+                {"_id": ObjectId(lead_id)},
+                {
+                    "$set": {
+                        "campaign_id": campaign_id,
+                        "response_status": "pending",
+                        "is_individual_followup": True,
+                        "pref_channel": channel,
+                        "pref_interval_days": interval_days,
+                    }
+                },
+            )
+
+            updated_lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
             send_followup(updated_lead, campaign)
 
         return jsonify({"message": "Follow-up started"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @leads_bp.route("/delete_company_leads/<company_id>", methods=["DELETE"])
 def delete_company_leads(company_id):
@@ -682,9 +694,6 @@ def delete_company_leads(company_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-import re
-import requests as http_requests
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
