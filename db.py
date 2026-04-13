@@ -14,6 +14,7 @@ compCollection = db["comp"]
 leadCollection = db["leads"]
 campCollection = db["campaigns"]
 msgCollection = db["messages"]
+stepCollection = db["steps"]
 
 
 def ensure_indexes():

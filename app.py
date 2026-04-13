@@ -8,6 +8,7 @@ from routes.admin import admin_bp
 from routes.webhooks import webhooks_bp
 from routes.followups import followups_bp
 from routes.lead_imports import lead_imports_bp
+from routes.campaigns import campaigns_bp
 from scheduler import start_scheduler
 
 app = Flask(__name__)
@@ -36,6 +37,7 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(webhooks_bp)
 app.register_blueprint(followups_bp)
 app.register_blueprint(lead_imports_bp)
+app.register_blueprint(campaigns_bp)
 
 start_scheduler()
 

@@ -6,8 +6,15 @@ SES_REGION = "ap-south-1"
 RESPONSE_BASE_URL = os.getenv("RESPONSE_BASE_URL", "http://127.0.0.1:5000")
 
 
-def render_message(template, lead):
-    return template.replace("{{name}}", lead.get("name", "there"))
+def render_message(template, lead, variables=None):
+    result = template
+    result = result.replace("{{name}}", lead.get("name", "there"))
+    result = result.replace("{{their_company}}", lead.get("company", "your company"))
+    if variables:
+        for key, value in variables.items():
+            if value:
+                result = result.replace("{{" + key + "}}", str(value))
+    return result
 
 
 def build_response_links(lead_id):
