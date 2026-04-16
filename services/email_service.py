@@ -27,25 +27,25 @@ def build_email_html(final_message, yes_link, no_link):
     safe_message = final_message.replace("\n", "<br>")
     return f"""
     <html>
-      <body style="font-family: Arial, sans-serif; background: #0a0a0a; color: white; padding: 24px;">
-        <div style="max-width: 600px; margin: 0 auto; background: #111; padding: 24px; border-radius: 12px; border: 1px solid #222;">
-          <p style="font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+      <body style="font-family: ‘DM Sans’, Arial, sans-serif; background: #0D1F24; color: #FFFFFF; padding: 24px;">
+        <div style="max-width: 600px; margin: 0 auto; background: #142830; padding: 28px; border-radius: 14px; border: 1px solid #1E3D47;">
+          <p style="font-size: 15px; line-height: 1.7; margin-bottom: 28px; color: #FFFFFF;">
             {safe_message}
           </p>
 
           <div style="margin-top: 24px;">
             <a href="{yes_link}"
-               style="display: inline-block; background: #22c55e; color: black; text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: bold; margin-right: 12px;">
+               style="display: inline-block; background: #22C55E; color: #0D1F24; text-decoration: none; padding: 12px 24px; border-radius: 10px; font-weight: 700; margin-right: 12px;">
               Yes
             </a>
 
             <a href="{no_link}"
-               style="display: inline-block; background: #ef4444; color: white; text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: bold;">
+               style="display: inline-block; background: #EF4444; color: #FFFFFF; text-decoration: none; padding: 12px 24px; border-radius: 10px; font-weight: 700;">
               No
             </a>
           </div>
 
-          <p style="margin-top: 24px; font-size: 12px; color: #aaa;">
+          <p style="margin-top: 28px; font-size: 12px; color: #6B8E95; border-top: 1px solid #1E3D47; padding-top: 16px;">
             If the buttons don’t work, use these links:<br>
             Yes: {yes_link}<br>
             No: {no_link}

@@ -10,79 +10,114 @@ campaigns_bp = Blueprint("campaigns", __name__)
 # Absolute day offsets: 0, 3, 6, 9, 14, 19, 25, 32, 40, 50, 62, 75
 DEFAULT_STEPS = [
     {
-        "step_number": 1, "gap_days": 0, "gap_label": "Recommended", "channel": "both",
-        "subject": "Following up on your inquiry",
-        "message": "Hi {{name}},\n\nI came across {{company}} and wanted to reach out directly.\n\nMost businesses we work with lose potential clients not because of bad leads — but because follow-up stops after the first or second message. The lead goes cold, someone else closes them.\n\n{{company_service}} helps fix that by automating your entire follow-up sequence so your team never have to chase manually again.\n\nWould you be open to a quick 15-minute call this week?\n\n{{sender_name}}\n{{company}}",
-        "sms_message": "Hi {{name}}, came across {{company}} and thought {{company_service}} could help. We automate follow-ups so no lead goes cold. Worth a quick call? Reply YES."
+        "step_number": 1,
+        "gap_days": 0,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Quick question about follow-up",
+        "message": "Hi {{name}},\n\nI came across {{company}} and wanted to reach out directly.\n\nMost businesses we work with are generating leads but losing them somewhere between the first message and the close — not because the leads are bad, but because follow-up stops.\n\nAGE automates your entire follow-up sequence across email and SMS so no lead goes cold without a response.\n\nWould you be open to a quick 15-minute call this week?\n\nPratham\nFounder, AGE — Automated Growth Ecosystem\nageautomation.in",
+        "sms_message": "Hi {{name}}, this is Pratham from AGE. We automate follow-ups for businesses so no lead goes cold. Worth a quick call? Reply YES."
     },
     {
-        "step_number": 2, "gap_days": 3, "gap_label": "Recommended", "channel": "email",
-        "subject": "Just checking in",
-        "message": "Hi {{name}},\n\nJust wanted to make sure my previous message reached you.\n\nWe have helped several businesses in your space with {{pain_point}} — happy to share how if that is useful.\n\nStill open to a quick call?\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, just following up on my earlier message. Would love to connect. Reply YES for a quick call."
+        "step_number": 2,
+        "gap_days": 3,
+        "gap_label": "Recommended",
+        "channel": "email",
+        "subject": "The cost of a missed follow-up",
+        "message": "Hi {{name}},\n\nA stat worth knowing — 80% of sales require 5 or more follow-ups, but 44% of salespeople stop after just one.\n\nThat gap is where most businesses lose revenue. Not to bad leads or bad pitches, but to inconsistent follow-up.\n\nAGE closes that gap automatically.\n\nHappy to show you how it works. Would a quick call make sense?\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, 80% of sales need 5+ follow-ups but most teams stop at one. AGE fixes that automatically. Interested? Reply YES."
     },
     {
-        "step_number": 3, "gap_days": 3, "gap_label": "Recommended", "channel": "both",
-        "subject": "Something you might find useful",
-        "message": "Hi {{name}},\n\nOne thing we hear from most businesses we talk to — {{common_pain_point}}.\n\nWe built {{company_service}} specifically to fix that. Happy to show you how in 10 minutes.\n\nInterested?\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, most businesses we work with struggle with {{common_pain_point}}. We fix that. Worth a 10-minute chat? Reply YES."
+        "step_number": 3,
+        "gap_days": 3,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "What this looks like in practice",
+        "message": "Hi {{name}},\n\nHere is what AGE actually does — when a lead comes in, it automatically sends a structured follow-up sequence across email and SMS for up to 75 days.\n\nEvery message is pre-written, timed, and personalised. The sequence stops the moment the lead replies.\n\nYour team does not have to touch it. They just handle the replies.\n\nWorth 10 minutes to see it in action?\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, AGE runs a 75-day follow-up sequence automatically. Your team just handles the replies. Worth 10 minutes? Reply YES."
     },
     {
-        "step_number": 4, "gap_days": 3, "gap_label": "Recommended", "channel": "email",
-        "subject": "Quick question",
-        "message": "Hi {{name}},\n\nAre you still looking for a solution to {{pain_point}}?\n\nIf yes — let us talk. If the timing is not right, just let me know and I will follow up later.\n\nEither way, happy to help whenever you are ready.\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, still looking for help with {{pain_point}}? Reply YES for a quick call or NO if timing is not right."
+        "step_number": 4,
+        "gap_days": 3,
+        "gap_label": "Recommended",
+        "channel": "email",
+        "subject": "One question",
+        "message": "Hi {{name}},\n\nSimple question — when a lead enquires and does not reply to the first message, what happens next?\n\nFor most businesses the honest answer is: not much. The team follows up once or twice and then moves on.\n\nAGE makes sure that never happens. Every lead gets followed up with consistently, for as long as it takes.\n\nOpen to a quick conversation?\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, what happens when a lead goes quiet after the first message? AGE makes sure they never just disappear. Reply YES to learn more."
     },
     {
-        "step_number": 5, "gap_days": 5, "gap_label": "Recommended", "channel": "both",
-        "subject": "How we helped a business just like yours",
-        "message": "Hi {{name}},\n\nOne of our recent clients was dealing with {{pain_point}}. Within {{timeframe}} of working with us they achieved {{result}}.\n\nWe would love to do the same for you.\n\nStill open to a quick chat?\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, we recently helped a business achieve {{result}} in {{timeframe}}. Happy to share how. Interested? Reply YES."
+        "step_number": 5,
+        "gap_days": 5,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Why teams switch to AGE",
+        "message": "Hi {{name}},\n\nThe businesses that come to us usually have the same story — good leads coming in, a sales team that is stretched, and follow-up that gets inconsistent the busier things get.\n\nAGE removes follow-up from the to-do list entirely. It runs in the background, keeps every lead warm, and only surfaces a lead to your team when they respond.\n\nIf that sounds familiar, it is worth a conversation.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, businesses use AGE when follow-up gets inconsistent as the team grows. It runs automatically so nothing slips. Interested? Reply YES."
     },
     {
-        "step_number": 6, "gap_days": 5, "gap_label": "Recommended", "channel": "both",
-        "subject": "Came across something that made me think of you",
-        "message": "Hi {{name}},\n\nI know we have been in touch a few times. I keep reaching out because I genuinely think we can help.\n\nMost businesses we talk to in your space are dealing with {{industry_pain_point}} right now.\n\nWould it make sense to have a 10-minute conversation — no pressure, just an overview?\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, businesses in your space are dealing with {{industry_pain_point}} right now. We help fix that. Worth 10 minutes? Reply YES."
+        "step_number": 6,
+        "gap_days": 5,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Still relevant?",
+        "message": "Hi {{name}},\n\nI have reached out a few times so I will keep this short.\n\nIf inconsistent follow-up is something your team deals with, AGE is worth looking at. If it is not a priority right now, just let me know and I will stop reaching out.\n\nEither way, happy to hear from you.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, last check-in — if follow-up consistency is something your team deals with, AGE can help. If not, just reply NO and I will stop."
     },
     {
-        "step_number": 7, "gap_days": 6, "gap_label": "Recommended", "channel": "both",
-        "subject": "What we are seeing in your industry right now",
-        "message": "Hi {{name}},\n\nWanted to share something relevant — {{industry_insight}}.\n\nBusinesses that address this early tend to {{positive_outcome}}. Those that do not usually {{negative_outcome}}.\n\nHappy to share what we are doing about it for our clients.\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, {{industry_insight_short}}. Happy to share how we are helping clients deal with this. Interested? Reply YES."
+        "step_number": 7,
+        "gap_days": 25,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Checking back in",
+        "message": "Hi {{name}},\n\nIt has been a while since I last reached out. Wanted to check back in case the timing is better now.\n\nAGE helps businesses automate follow-up so leads do not go cold — across email and SMS, running in the background without any manual effort from your team.\n\nIf this is relevant now, happy to jump on a call.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, Pratham from AGE checking back in. If follow-up automation is relevant now, happy to connect. Reply YES."
     },
     {
-        "step_number": 8, "gap_days": 7, "gap_label": "Recommended", "channel": "both",
-        "subject": "The most common concern we hear",
-        "message": "Hi {{name}},\n\nThe most common thing we hear from businesses before they start working with us is — {{common_objection}}.\n\nCompletely fair. Here is how we address that: {{objection_response}}.\n\nHappy to walk you through it. 15 minutes is all it takes.\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, a lot of businesses worry about {{common_objection_short}}. We have a clear answer for that. Want to hear it? Reply YES."
+        "step_number": 8,
+        "gap_days": 7,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Something that might be useful",
+        "message": "Hi {{name}},\n\nI put together a quick overview of how AGE works for businesses in your space — how the sequence is structured, what gets automated, and what the team actually sees.\n\nNo call needed. If you want me to send it across, just reply and I will.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, I can send a quick overview of how AGE works — no call needed. Just reply YES and I will send it across."
     },
     {
-        "step_number": 9, "gap_days": 8, "gap_label": "Recommended", "channel": "both",
-        "subject": "Before I stop reaching out",
-        "message": "Hi {{name}},\n\nI do not want to keep filling your inbox if the timing is not right.\n\nBut before I stop — is there anything specific holding you back? Budget, timing, something else?\n\nSometimes a 10-minute conversation clears things up.\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, before I stop reaching out — is anything holding you back? Just reply and let me know. Happy to help."
+        "step_number": 9,
+        "gap_days": 8,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Direct question",
+        "message": "Hi {{name}},\n\nIs follow-up automation something you are actively looking at, or is the timing just not right?\n\nA one-word reply would genuinely help me understand whether it is worth staying in touch.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, quick one — is follow-up automation something you are actively exploring right now? Just reply YES or NO."
     },
     {
-        "step_number": 10, "gap_days": 10, "gap_label": "Recommended", "channel": "both",
-        "subject": "No strings — just a quick offer",
-        "message": "Hi {{name}},\n\nHappy to put together a no-obligation overview of how {{company_service}} could work specifically for {{their_company}} — just so you have something concrete to look at.\n\nNo calls, no pressure. Just useful information you can review at your own pace.\n\nWant me to send that across?\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, want a no-obligation overview of how we can help {{their_company}}? No calls, no pressure. Reply YES and I will send it."
+        "step_number": 10,
+        "gap_days": 10,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "One last thought",
+        "message": "Hi {{name}},\n\nMost businesses we talk to are not looking for more leads. They just want to make sure the ones they already have get followed up with properly.\n\nIf that is the situation at {{company}}, AGE is a straightforward fix.\n\nHappy to walk you through it whenever the time is right.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, most teams do not need more leads — just better follow-up on the ones they have. AGE handles that. Worth a chat? Reply YES."
     },
     {
-        "step_number": 11, "gap_days": 12, "gap_label": "Recommended", "channel": "both",
+        "step_number": 11,
+        "gap_days": 12,
+        "gap_label": "Recommended",
+        "channel": "both",
         "subject": "Closing the loop",
-        "message": "Hi {{name}},\n\nI have reached out a few times and I completely understand if the timing is not right or you have already found what you were looking for.\n\nIf you are still open to it — even just a quick conversation — I would love to reconnect. A lot has changed since we first reached out.\n\nJust reply to this email and we will take it from there.\n\n{{sender_name}}",
-        "sms_message": "Hi {{name}}, still open to a quick conversation? A lot has changed since we first reached out. Just reply and we will reconnect."
+        "message": "Hi {{name}},\n\nI will close the loop here.\n\nIf follow-up automation ever becomes a priority, feel free to reach out at any point — pratham@ageautomation.in or ageautomation.in.\n\nWishing you and the team well.\n\nPratham\nFounder, AGE",
+        "sms_message": "Hi {{name}}, closing the loop. If follow-up automation becomes a priority, feel free to reach out anytime. - Pratham, AGE"
     },
     {
-        "step_number": 12, "gap_days": 13, "gap_label": "Recommended", "channel": "both",
-        "subject": "Signing off — but the door is always open",
-        "message": "Hi {{name}},\n\nThis will be my last message for a while — I do not want to keep reaching out if it is not the right time.\n\nIf you ever want to revisit {{company_service}}, you know where to find us. We would love to help whenever you are ready.\n\nWishing you all the best.\n\n{{sender_name}}\n{{company}}",
-        "sms_message": "Hi {{name}}, this is my last message for now. If you ever want to revisit {{company_service}}, we are here. Wishing you all the best."
+        "step_number": 12,
+        "gap_days": 13,
+        "gap_label": "Recommended",
+        "channel": "both",
+        "subject": "Last note",
+        "message": "Hi {{name}},\n\nThis is my last message.\n\nIf you ever want to stop losing leads to missed follow-ups, AGE is built exactly for that. You know where to find us.\n\nAll the best.\n\nPratham\nFounder, AGE — Automated Growth Ecosystem\nageautomation.in",
+        "sms_message": "Hi {{name}}, last note from me. If you ever want to stop losing leads to missed follow-ups, AGE is built for that. ageautomation.in - Pratham"
     }
 ]
-
 
 def serialize_step(step):
     return {
