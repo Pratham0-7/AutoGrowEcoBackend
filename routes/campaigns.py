@@ -65,7 +65,7 @@ DEFAULT_STEPS = [
     },
     {
         "step_number": 7,
-        "gap_days": 25,
+        "gap_days": 6,
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Checking back in",
