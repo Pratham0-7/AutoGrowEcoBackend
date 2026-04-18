@@ -8,6 +8,11 @@ campaigns_bp = Blueprint("campaigns", __name__)
 
 # Relative gap_days = days to wait after the PREVIOUS step was sent
 # Absolute day offsets: 0, 3, 6, 9, 14, 19, 25, 32, 40, 50, 62, 75
+#
+# IMPORTANT:
+# These steps are now TEMPLATE steps, not hardcoded AGE copy.
+# The scheduler already calls render_message(message_template, lead, variables),
+# so placeholders like {{your_name}} and {{call_to_action}} will be filled at send time.
 DEFAULT_STEPS = [
     {
         "step_number": 1,
@@ -15,8 +20,23 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Quick question about follow-up",
-        "message": "Hi {{name}},\n\nI am Pratham, founder of Automated Growth Ecosystem (AGE).\n\nWe help businesses stay consistent with follow-up so potential clients do not go cold after the first or second message.\n\nMost teams do not lose leads because the leads are bad. They lose them because follow-up slows down, gets delayed, or stops completely.\n\nThat is exactly what AGE is built to solve. We automate follow-up across email and SMS so your team can stay on top of every lead without manually chasing each one.\n\nWould you be open to a quick 15-minute call this week?\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, this is Pratham from AGE. We help businesses automate follow-ups so no lead goes cold. Open to a quick call? Reply YES.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "I am {{your_name}}.\n\n"
+            "{{product_service}}\n\n"
+            "We help with {{help_with}}.\n\n"
+            "The main problem we solve is {{main_problem}}.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, this is {{your_name}}. "
+            "{{product_service}} "
+            "We help with {{help_with}}. "
+            "{{call_to_action}} Reply YES."
+        ),
     },
     {
         "step_number": 2,
@@ -24,8 +44,21 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "email",
         "subject": "The cost of a missed follow-up",
-        "message": "Hi {{name}},\n\nA stat worth knowing: 80% of sales require 5 or more follow-ups, but 44% of salespeople stop after just one.\n\nThat gap is where most businesses lose revenue. Not to bad leads or bad pitches, but to inconsistent follow-up.\n\nAGE helps close that gap automatically.\n\nHappy to show you how it works. Would a quick call make sense?\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, 80% of sales need 5+ follow-ups, but most teams stop after one. AGE helps fix that automatically. Interested? Reply YES.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "A lot of teams do not lose leads because the leads are bad. "
+            "They lose them because follow-up slows down, gets delayed, or stops.\n\n"
+            "{{product_service}}\n\n"
+            "We help with {{help_with}}, and the main problem we solve is {{main_problem}}.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, many teams lose leads because follow-up gets inconsistent. "
+            "{{product_service}} {{call_to_action}} Reply YES."
+        ),
     },
     {
         "step_number": 3,
@@ -33,8 +66,21 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "What this looks like in practice",
-        "message": "Hi {{name}},\n\nHere is what AGE actually does. When a lead comes in, it automatically sends a structured follow-up sequence across email and SMS for up to 75 days.\n\nEvery message is pre-written, timed, and personalised. The sequence stops as soon as the lead replies.\n\nYour team does not have to keep chasing manually. They just handle the replies that come in.\n\nWorth 10 minutes to see it in action?\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, AGE runs a 75-day follow-up sequence automatically. Your team just handles the replies. Worth 10 minutes? Reply YES.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "Here is what this looks like in practice.\n\n"
+            "{{product_service}}\n\n"
+            "We help with {{help_with}} so businesses do not keep losing opportunities because of {{main_problem}}.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, here is what this looks like in practice: "
+            "{{product_service}} We help with {{help_with}}. "
+            "{{call_to_action}} Reply YES."
+        ),
     },
     {
         "step_number": 4,
@@ -42,17 +88,41 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "email",
         "subject": "One question",
-        "message": "Hi {{name}},\n\nSimple question. When a lead enquires and does not reply to the first message, what happens next?\n\nFor most businesses, the honest answer is not much. The team follows up once or twice and then moves on.\n\nAGE makes sure that does not happen. Every lead gets followed up with consistently, for as long as it takes.\n\nOpen to a quick conversation?\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, what happens when a lead goes quiet after the first message? AGE makes sure they do not just disappear. Reply YES to learn more.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "Simple question: is {{main_problem}} something your team deals with today?\n\n"
+            "{{product_service}}\n\n"
+            "We help with {{help_with}}.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, quick question: is {{main_problem}} something your team deals with? "
+            "{{call_to_action}}"
+        ),
     },
     {
         "step_number": 5,
         "gap_days": 5,
         "gap_label": "Recommended",
         "channel": "both",
-        "subject": "Why teams switch to AGE",
-        "message": "Hi {{name}},\n\nThe businesses that come to us usually have the same story: good leads coming in, a sales team that is stretched, and follow-up that gets inconsistent the busier things get.\n\nAGE removes follow-up from the daily to-do list. It runs in the background, keeps every lead warm, and only brings a lead back to your team when they respond.\n\nIf that sounds familiar, it is worth a conversation.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, businesses use AGE when follow-up gets inconsistent as the team grows. It runs automatically so nothing slips. Interested? Reply YES.",
+        "subject": "Why teams switch to this",
+        "message": (
+            "Hi {{name}},\n\n"
+            "The teams that find this useful usually have the same issue: {{main_problem}}.\n\n"
+            "{{product_service}}\n\n"
+            "We help with {{help_with}} without adding more manual work.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, teams usually use this when {{main_problem}} becomes a real issue. "
+            "{{product_service}} {{call_to_action}}"
+        ),
     },
     {
         "step_number": 6,
@@ -60,8 +130,20 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Still relevant?",
-        "message": "Hi {{name}},\n\nI have reached out a few times, so I will keep this short.\n\nIf inconsistent follow-up is something your team deals with, AGE is worth looking at. If it is not a priority right now, just let me know and I will stop reaching out.\n\nEither way, happy to hear from you.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, last check-in. If follow-up consistency is something your team deals with, AGE can help. If not, just reply NO and I will stop.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "I have reached out a few times, so I will keep this short.\n\n"
+            "If {{main_problem}} is still relevant for your team, {{product_service}} may be useful.\n\n"
+            "{{call_to_action}}\n\n"
+            "If not, no worries at all.\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, still relevant? If {{main_problem}} is something your team is dealing with, "
+            "{{product_service}} may help. Reply YES or NO."
+        ),
     },
     {
         "step_number": 7,
@@ -69,8 +151,20 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Checking back in",
-        "message": "Hi {{name}},\n\nIt has been a while since I last reached out, so I wanted to check back in case the timing is better now.\n\nAGE helps businesses automate follow-up so leads do not go cold across email and SMS, without adding manual work for the team.\n\nIf this is relevant now, happy to jump on a quick call.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, Pratham from AGE checking back in. If follow-up automation is relevant now, happy to connect. Reply YES.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "Just checking back in in case the timing is better now.\n\n"
+            "{{product_service}}\n\n"
+            "We help with {{help_with}} and solve {{main_problem}}.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, checking back in. {{product_service}} "
+            "We help with {{help_with}}. {{call_to_action}}"
+        ),
     },
     {
         "step_number": 8,
@@ -78,8 +172,20 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Something that might be useful",
-        "message": "Hi {{name}},\n\nI put together a quick overview of how AGE works for businesses in your space, including how the sequence is structured, what gets automated, and what your team actually sees.\n\nNo call needed. If you want me to send it across, just reply and I will.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, I can send a quick overview of how AGE works. No call needed. Just reply YES and I will send it across.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "Thought this might be useful to send over.\n\n"
+            "{{product_service}}\n\n"
+            "It is built for teams dealing with {{main_problem}} and needing help with {{help_with}}.\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, something that might be useful: {{product_service}} "
+            "Built for teams dealing with {{main_problem}}. {{call_to_action}}"
+        ),
     },
     {
         "step_number": 9,
@@ -87,8 +193,19 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Direct question",
-        "message": "Hi {{name}},\n\nIs follow-up automation something you are actively looking at, or is the timing just not right?\n\nA one-word reply would genuinely help me understand whether it makes sense to stay in touch.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, quick one. Is follow-up automation something you are actively exploring right now? Just reply YES or NO.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "Direct question: is solving {{main_problem}} something you are actively looking at right now?\n\n"
+            "{{product_service}}\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, direct question: are you actively looking for a way to solve {{main_problem}}? "
+            "{{call_to_action}}"
+        ),
     },
     {
         "step_number": 10,
@@ -96,8 +213,20 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "One last thought",
-        "message": "Hi {{name}},\n\nMost businesses we talk to are not looking for more leads. They just want to make sure the ones they already have get followed up with properly.\n\nIf that is the situation at {{company}}, AGE is a straightforward fix.\n\nHappy to walk you through it whenever the time is right.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, most teams do not need more leads, just better follow-up on the ones they already have. AGE handles that. Worth a chat? Reply YES.",
+        "message": (
+            "Hi {{name}},\n\n"
+            "One last thought.\n\n"
+            "A lot of teams do not need more leads. They just need a better way to deal with {{main_problem}}.\n\n"
+            "{{product_service}}\n\n"
+            "{{call_to_action}}\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, one last thought: many teams do not need more leads, they just need a better way "
+            "to solve {{main_problem}}. {{call_to_action}}"
+        ),
     },
     {
         "step_number": 11,
@@ -105,8 +234,20 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Closing the loop",
-        "message": "Hi {{name}},\n\nI will close the loop here.\n\nIf follow-up automation ever becomes a priority, feel free to reach out anytime at pratham@ageautomation.in or ageautomation.in.\n\nWishing you and the team well.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, closing the loop. If follow-up automation becomes a priority, feel free to reach out anytime. - Pratham, AGE",
+        "message": (
+            "Hi {{name}},\n\n"
+            "I will close the loop here.\n\n"
+            "If {{main_problem}} ever becomes a bigger priority, {{product_service}} may be worth a look.\n\n"
+            "You can always reach me here.\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{sender_email}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, closing the loop here. If solving {{main_problem}} becomes a priority, "
+            "feel free to reach out. - {{your_name}}"
+        ),
     },
     {
         "step_number": 12,
@@ -114,10 +255,23 @@ DEFAULT_STEPS = [
         "gap_label": "Recommended",
         "channel": "both",
         "subject": "Last note",
-        "message": "Hi {{name}},\n\nThis is my last message for now.\n\nI reached out because I genuinely believe AGE can help businesses that are losing opportunities due to inconsistent follow-up.\n\nIf that becomes relevant for you later, you know where to find us.\n\nAll the best.\n\nPratham\nFounder, Automated Growth Ecosystem (AGE)\nageautomation.in",
-        "sms_message": "Hi {{name}}, last note from me. If you ever want to stop losing leads to missed follow-ups, AGE is built for that. ageautomation.in - Pratham",
+        "message": (
+            "Hi {{name}},\n\n"
+            "This is my last note for now.\n\n"
+            "{{product_service}}\n\n"
+            "I reached out because I genuinely believe it can help teams dealing with {{main_problem}}.\n\n"
+            "If that becomes relevant later, feel free to reply anytime.\n\n"
+            "{{your_name}}\n"
+            "{{signature_title}}\n"
+            "{{website}}"
+        ),
+        "sms_message": (
+            "Hi {{name}}, last note from me. If {{main_problem}} becomes a priority later, "
+            "feel free to reach out. - {{your_name}}"
+        ),
     },
 ]
+
 
 def serialize_step(step):
     return {
@@ -140,6 +294,39 @@ def serialize_step(step):
             step.get("updated_at").isoformat() if step.get("updated_at") else None
         ),
     }
+
+
+def _clean_variables(variables, company=None):
+    """
+    Normalizes sequence variables and provides safe defaults.
+    These keys are what the templates above use.
+    """
+    variables = variables or {}
+
+    company_name = company.get("name", "") if company else ""
+    sender_email = company.get("sender_email", "") if company else ""
+    website = company.get("website", "") if company else ""
+
+    normalized = {
+        "your_name": variables.get("your_name", "").strip(),
+        "product_service": variables.get("product_service", "").strip(),
+        "help_with": variables.get("help_with", "").strip(),
+        "main_problem": variables.get("main_problem", "").strip(),
+        "call_to_action": variables.get("call_to_action", "").strip(),
+        "industry": variables.get("industry", "").strip(),
+        "signature_title": variables.get("signature_title", "").strip(),
+        "website": variables.get("website", "").strip() or website,
+        "sender_email": variables.get("sender_email", "").strip() or sender_email,
+        "company": variables.get("company", "").strip() or company_name,
+    }
+
+    # Reasonable defaults so blank forms do not produce ugly signatures.
+    if not normalized["signature_title"]:
+        normalized["signature_title"] = "Founder"
+    if not normalized["website"]:
+        normalized["website"] = "ageautomation.in"
+
+    return normalized
 
 
 @campaigns_bp.route("/campaigns/sequence/<company_id>", methods=["GET"])
@@ -199,6 +386,7 @@ def create_sequence_campaign():
         if not company:
             return jsonify({"error": "Company not found"}), 404
 
+        variables = _clean_variables(variables, company)
         now = datetime.utcnow()
 
         campaign = {
@@ -212,6 +400,7 @@ def create_sequence_campaign():
             "variables": variables,
             "notified_steps": [],
             "created_at": now,
+            "updated_at": now,
         }
 
         result = campCollection.insert_one(campaign)
@@ -225,8 +414,11 @@ def create_sequence_campaign():
                     **step,
                     "campaign_id": campaign_id,
                     "company_id": company_id,
+                    # Respect campaign-level selected channel if the step is not already more specific.
+                    "channel": step.get("channel", channel),
                     "status": "pending",
                     "created_at": now,
+                    "updated_at": now,
                 }
             )
 
@@ -237,6 +429,7 @@ def create_sequence_campaign():
                 {
                     "campaign_id": campaign_id_str,
                     "name": name,
+                    "variables": variables,
                     "message": "Sequence campaign created with 12 default steps",
                 }
             ),
@@ -353,7 +546,8 @@ def toggle_auto_run(campaign_id):
                     )
 
         campCollection.update_one(
-            {"_id": ObjectId(campaign_id)}, {"$set": {"auto_run": auto_run}}
+            {"_id": ObjectId(campaign_id)},
+            {"$set": {"auto_run": auto_run, "updated_at": datetime.utcnow()}},
         )
 
         return (
@@ -392,12 +586,16 @@ def enroll_leads(campaign_id):
         now = datetime.utcnow()
         enrolled = 0
         skipped = 0
+        skipped_reasons = []
 
         for lead_id in lead_ids:
             try:
                 lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
                 if not lead:
                     skipped += 1
+                    skipped_reasons.append(
+                        {"lead_id": lead_id, "reason": "Lead not found"}
+                    )
                     continue
 
                 already_active = (
@@ -407,6 +605,12 @@ def enroll_leads(campaign_id):
                 )
                 if already_active:
                     skipped += 1
+                    skipped_reasons.append(
+                        {
+                            "lead_id": lead_id,
+                            "reason": "Lead already enrolled in another active sequence",
+                        }
+                    )
                     continue
 
                 leadCollection.update_one(
@@ -429,14 +633,24 @@ def enroll_leads(campaign_id):
             except Exception as e:
                 print(f"[ENROLL] Error enrolling lead {lead_id}: {e}")
                 skipped += 1
+                skipped_reasons.append(
+                    {"lead_id": lead_id, "reason": f"Exception: {str(e)}"}
+                )
                 continue
+
+        message = (
+            f"{enrolled} leads enrolled. Step 1 will send within 1 minute."
+            if enrolled > 0
+            else "No leads were enrolled."
+        )
 
         return (
             jsonify(
                 {
                     "enrolled": enrolled,
                     "skipped": skipped,
-                    "message": f"{enrolled} leads enrolled. Step 1 will send within 1 minute.",
+                    "skipped_reasons": skipped_reasons,
+                    "message": message,
                 }
             ),
             200,
@@ -592,6 +806,9 @@ def update_variables(campaign_id):
 
         if not isinstance(variables, dict):
             return jsonify({"error": "variables must be an object"}), 400
+
+        company = compCollection.find_one({"_id": ObjectId(campaign["company_id"])})
+        variables = _clean_variables(variables, company)
 
         campCollection.update_one(
             {"_id": ObjectId(campaign_id)},

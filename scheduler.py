@@ -3,7 +3,7 @@ from bson import ObjectId
 from apscheduler.schedulers.background import BackgroundScheduler
 from botocore.exceptions import ClientError
 
-from db import leadCollection, campCollection, msgCollection, compCollection, stepCollection
+from db import leadCollection, campCollection, msgCollection, compCollection, stepCollection, usersCollection
 from services.msg91 import send_sms_msg91
 from services.email_service import (
     render_message,
@@ -88,20 +88,28 @@ def send_followup(lead, campaign):
     text_body = f"{final_message}\n\nYes: {yes_link}\nNo: {no_link}"
     html_body = build_email_html(final_message, yes_link, no_link)
 
+    test_mode = campaign.get("test_mode", False)
+    if test_mode and company:
+        creator = usersCollection.find_one({"_id": ObjectId(company.get("created_by", ""))}) if company.get("created_by") else None
+        test_recipient = creator.get("email") if creator else None
+    else:
+        test_recipient = None
+
     if channel in ["email", "both"]:
         if not sender_email:
             raise ValueError(f"Sender email not configured for company {lead['company_id']}")
-        if not lead.get("email"):
+        if not lead.get("email") and not test_recipient:
             raise ValueError(f"Missing email for lead {lead_id_str}")
 
+        to_email = test_recipient or lead["email"]
         send_email_ses(
-            to_email=lead["email"],
-            subject=subject,
+            to_email=to_email,
+            subject=f"[TEST – {lead.get('name', lead_id_str)}] {subject}" if test_recipient else subject,
             body_text=text_body,
             sender_email=sender_email,
             html_body=html_body
         )
-        print(f"[SCHEDULER] Email sent for lead {lead_id_str}")
+        print(f"[SCHEDULER] Email sent for lead {lead_id_str} → {to_email}")
 
     if channel in ["sms", "both"]:
         sms_enabled = company.get("sms_enabled", False) if company else False
