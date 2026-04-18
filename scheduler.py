@@ -262,6 +262,7 @@ def process_followups():
         due_leads = list(leadCollection.find({
             "next_followup_at": {"$ne": None, "$lte": now},
             "sequence_complete": {"$ne": True},
+            "email_bounced": {"$ne": True},
         }))
 
         print(f"[SCHEDULER] Found {len(due_leads)} due leads at {now.isoformat()}")

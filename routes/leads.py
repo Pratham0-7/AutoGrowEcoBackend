@@ -21,6 +21,9 @@ def get_leads(company_id):
                     "name": lead.get("name", ""),
                     "email": lead.get("email", ""),
                     "phone": lead.get("phone", ""),
+                    "campaign_id": str(lead["campaign_id"]) if lead.get("campaign_id") else None,
+                    "current_step": lead.get("current_step", 1),
+                    "sequence_complete": lead.get("sequence_complete", False),
                     "send_status": lead.get("send_status", "not sent"),
                     "response_status": lead.get("response_status", "pending"),
                     "followup_count": lead.get("followup_count", 0),
@@ -29,6 +32,8 @@ def get_leads(company_id):
                     "is_individual_followup": lead.get("is_individual_followup", False),
                     "pref_channel": lead.get("pref_channel", "email"),
                     "pref_interval_days": lead.get("pref_interval_days", 2),
+                    "email_bounced": lead.get("email_bounced", False),
+                    "bounce_type": lead.get("bounce_type"),
                 }
             )
 

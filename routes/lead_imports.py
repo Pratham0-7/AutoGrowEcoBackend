@@ -21,6 +21,7 @@ def upload_csv():
     file = request.files.get("file")
     company_id = request.form.get("company_id")
     user_id = request.form.get("user_id")
+    campaign_id = request.form.get("campaign_id") or None
 
     if not file:
         return jsonify({"error": "No file uploaded"}), 400
@@ -52,7 +53,7 @@ def upload_csv():
         df.columns = [col.lower().strip() for col in df.columns]
         rows = df.to_dict(orient="records")
 
-        inserted_count, skipped_count, duplicates = import_rows(rows, company_id, user_id)
+        inserted_count, skipped_count, duplicates = import_rows(rows, company_id, user_id, campaign_id=campaign_id)
 
         os.remove(filepath)
 

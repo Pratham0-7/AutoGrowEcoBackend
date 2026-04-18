@@ -1,8 +1,12 @@
 import os
+import re
+import json
 import hmac
 import hashlib
 import base64
 import time
+from datetime import datetime
+from urllib.request import urlopen
 
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
@@ -128,3 +132,62 @@ def clerk_webhook():
 
     # All other events — acknowledge but do nothing
     return jsonify({"received": True, "event": event_type}), 200
+
+
+@webhooks_bp.route("/webhooks/ses", methods=["POST"])
+def ses_bounce_webhook():
+    try:
+        payload = json.loads(request.get_data(as_text=True))
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    msg_type = payload.get("Type")
+
+    # SNS requires us to hit SubscribeURL to confirm the subscription
+    if msg_type == "SubscriptionConfirmation":
+        subscribe_url = payload.get("SubscribeURL", "")
+        if subscribe_url.startswith("https://sns."):
+            urlopen(subscribe_url)
+        return jsonify({"received": True}), 200
+
+    if msg_type != "Notification":
+        return jsonify({"received": True}), 200
+
+    try:
+        message = json.loads(payload.get("Message", "{}"))
+    except Exception:
+        return jsonify({"error": "Invalid message"}), 400
+
+    notification_type = message.get("notificationType")
+
+    if notification_type == "Bounce":
+        bounce = message.get("bounce", {})
+        bounce_type = bounce.get("bounceType", "Permanent").lower()
+        for recipient in bounce.get("bouncedRecipients", []):
+            email = (recipient.get("emailAddress") or "").strip().lower()
+            if email:
+                leadCollection.update_many(
+                    {"email": re.compile(f"^{re.escape(email)}$", re.IGNORECASE)},
+                    {"$set": {
+                        "email_bounced": True,
+                        "bounce_type": bounce_type,
+                        "bounced_at": datetime.utcnow(),
+                    }},
+                )
+                print(f"[SES] Bounce ({bounce_type}) for {email}", flush=True)
+
+    elif notification_type == "Complaint":
+        for recipient in message.get("complaint", {}).get("complainedRecipients", []):
+            email = (recipient.get("emailAddress") or "").strip().lower()
+            if email:
+                leadCollection.update_many(
+                    {"email": re.compile(f"^{re.escape(email)}$", re.IGNORECASE)},
+                    {"$set": {
+                        "email_bounced": True,
+                        "bounce_type": "complaint",
+                        "bounced_at": datetime.utcnow(),
+                    }},
+                )
+                print(f"[SES] Complaint for {email}", flush=True)
+
+    return jsonify({"received": True}), 200

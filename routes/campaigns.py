@@ -549,6 +549,37 @@ def approve_step(campaign_id, step_number):
         return jsonify({"error": str(e)}), 500
 
 
+@campaigns_bp.route("/campaigns/<campaign_id>", methods=["DELETE"])
+def delete_sequence(campaign_id):
+    try:
+        campaign = campCollection.find_one({"_id": ObjectId(campaign_id)})
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+
+        leadCollection.update_many(
+            {"campaign_id": {"$in": [campaign_id, ObjectId(campaign_id)]}},
+            {
+                "$unset": {
+                    "campaign_id": "",
+                    "current_step": "",
+                    "sequence_complete": "",
+                    "next_followup_at": "",
+                    "pending_approval": "",
+                    "recommended_send_at": "",
+                    "review_deadline_at": "",
+                }
+            },
+        )
+
+        stepCollection.delete_many({"campaign_id": ObjectId(campaign_id)})
+        campCollection.delete_one({"_id": ObjectId(campaign_id)})
+
+        return jsonify({"message": "Sequence deleted and all leads unenrolled"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @campaigns_bp.route("/campaigns/<campaign_id>/variables", methods=["PUT"])
 def update_variables(campaign_id):
     try:

@@ -40,10 +40,18 @@ def fetch_sheet_rows(sheet_id, access_token=None):
     return result
 
 
-def import_rows(rows, company_id, user_id):
+def import_rows(rows, company_id, user_id, campaign_id=None):
+    from db import campCollection
     inserted = 0
     skipped = 0
     duplicates = []
+
+    enroll_campaign = None
+    if campaign_id:
+        try:
+            enroll_campaign = campCollection.find_one({"_id": ObjectId(campaign_id), "is_sequence": True})
+        except Exception:
+            pass
 
     for row in rows:
         name = str(row.get("name", "")).strip()
@@ -84,6 +92,7 @@ def import_rows(rows, company_id, user_id):
             })
             continue
 
+        now = datetime.utcnow()
         leadCollection.insert_one({
             "company_id": company_id,
             "uploaded_by": user_id or "gsheet_sync",
@@ -94,8 +103,11 @@ def import_rows(rows, company_id, user_id):
             "response_status": "pending",
             "followup_count": 0,
             "last_followup_sent_at": None,
-            "next_followup_at": None,
-            "campaign_id": None,
+            "next_followup_at": now if enroll_campaign else None,
+            "campaign_id": ObjectId(campaign_id) if enroll_campaign else None,
+            "current_step": 1 if enroll_campaign else None,
+            "sequence_complete": False if enroll_campaign else None,
+            "pending_approval": False if enroll_campaign else None,
             "source": "google_sheets" if user_id is None else "csv_upload",
         })
         inserted += 1
