@@ -6,7 +6,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
-client = MongoClient(MONGO_URI)
+if not MONGO_URI:
+    raise ValueError("MONGO_URI is not set")
+
+client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
 db = client["age_db"]
 
 usersCollection = db["users"]
@@ -15,13 +18,13 @@ leadCollection = db["leads"]
 campCollection = db["campaigns"]
 msgCollection = db["messages"]
 stepCollection = db["steps"]
+bookingsCollection = db["bookings"]
 
 
 def ensure_indexes():
     """
-    Create unique indexes on critical fields.
-    Fails gracefully if duplicates already exist in the DB — run
-    POST /admin/cleanup_duplicates first, then this will succeed.
+    Create useful indexes.
+    Fails gracefully if duplicates already exist in the DB.
     """
     errors = []
 
@@ -29,7 +32,7 @@ def ensure_indexes():
         usersCollection.create_index(
             [("clerk_user_id", ASCENDING)],
             unique=True,
-            sparse=True,   # ignores docs where clerk_user_id is missing
+            sparse=True,
             name="clerk_user_id_unique",
         )
         print("[DB] Index OK: users.clerk_user_id (unique)", flush=True)
@@ -51,21 +54,39 @@ def ensure_indexes():
         compCollection.create_index(
             [("created_by", ASCENDING)],
             unique=True,
-            sparse=True,   # old auth.py records lack created_by — excluded from index
+            sparse=True,
             name="company_created_by_unique",
         )
         print("[DB] Index OK: comp.created_by (unique)", flush=True)
     except OperationFailure as e:
         errors.append(f"comp.created_by: {e.details.get('errmsg', str(e))}")
 
+    # Booking indexes
+    try:
+        bookingsCollection.create_index(
+            [("start_at", ASCENDING)],
+            name="booking_start_at_idx",
+        )
+        print("[DB] Index OK: bookings.start_at", flush=True)
+    except OperationFailure as e:
+        errors.append(f"bookings.start_at: {e.details.get('errmsg', str(e))}")
+
+    try:
+        bookingsCollection.create_index(
+            [("date", ASCENDING), ("time", ASCENDING), ("status", ASCENDING)],
+            name="booking_slot_status_idx",
+        )
+        print("[DB] Index OK: bookings.date_time_status", flush=True)
+    except OperationFailure as e:
+        errors.append(f"bookings.date_time_status: {e.details.get('errmsg', str(e))}")
+
     if errors:
-        print("[DB] Some indexes could not be created (duplicates exist):", flush=True)
+        print("[DB] Some indexes could not be created:", flush=True)
         for err in errors:
             print(f"  - {err}", flush=True)
-        print("[DB] Run POST /admin/cleanup_duplicates then restart to apply indexes.", flush=True)
 
     return errors
 
 
-# Try on startup — will log warnings if duplicates exist but won't crash the server
+# Try on startup
 ensure_indexes()
