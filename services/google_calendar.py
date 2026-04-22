@@ -175,13 +175,18 @@ def create_event(
     title: str = "Demo call for AGE"
 ) -> Optional[Dict[str, Any]]:
     """
-    Create a Google Calendar event and return:
+    Create a Google Calendar event on the demo calendar and return:
     {
       "id": "...",
       "htmlLink": "...",
       "start": "...",
       "end": "..."
     }
+
+    Note:
+    With a service account on a personal Gmail calendar, do NOT add attendees
+    and do NOT use sendUpdates="all". Google blocks that unless domain-wide
+    delegation is configured on Google Workspace.
     """
     service = _get_service()
     if not service:
@@ -208,16 +213,9 @@ def create_event(
                 "dateTime": end.isoformat(),
                 "timeZone": "Asia/Kolkata"
             },
-            "attendees": [
-                {
-                    "email": email,
-                    "displayName": name
-                }
-            ],
             "reminders": {
                 "useDefault": False,
                 "overrides": [
-                    {"method": "email", "minutes": 60},
                     {"method": "popup", "minutes": 10},
                 ],
             },
@@ -226,7 +224,6 @@ def create_event(
         created = service.events().insert(
             calendarId=CALENDAR_ID,
             body=event,
-            sendUpdates="all",
         ).execute()
 
         return {
