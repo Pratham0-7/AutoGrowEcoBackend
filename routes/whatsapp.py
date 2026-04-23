@@ -93,7 +93,7 @@ def send_manual():
             result = send_whatsapp_template(
                 phone=phone,
                 template_name=template_name,
-                template_params=[lead_name, message] if lead_name else [message],
+                template_params={"name": lead_name},
                 integrated_number=integrated_number,
                 auth_key=auth_key,
             )
@@ -194,7 +194,7 @@ def send_bulk_whatsapp(company_id):
                     result = send_whatsapp_template(
                         phone=phone,
                         template_name=template_name,
-                        template_params=[lead_name, personal_msg] if lead_name else [personal_msg],
+                        template_params={"name": lead_name},
                         integrated_number=integrated_number,
                         auth_key=auth_key,
                     )

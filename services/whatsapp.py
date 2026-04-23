@@ -23,7 +23,7 @@ def _safe_json(resp):
         return {"raw_text": resp.text}
 
 
-def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_key: str = None) -> dict:
+def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_key: str | None = None) -> dict:
     key = auth_key or PLATFORM_WA_AUTH_KEY
 
     if not key:
@@ -97,9 +97,9 @@ def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_ke
 def send_whatsapp_template(
     phone: str,
     template_name: str,
-    template_params: list,
+    template_params: dict,
     integrated_number: str,
-    auth_key: str = None,
+    auth_key: str | None = None,
     language_code: str = "en",
 ) -> dict:
     key = auth_key or PLATFORM_WA_AUTH_KEY
@@ -116,30 +116,36 @@ def send_whatsapp_template(
     formatted_to = format_phone_wa(phone)
     formatted_from = format_phone_wa(integrated_number)
 
-    components = []
-    if template_params:
-        components.append({
-            "type": "body",
-            "parameters": [{"type": "text", "text": str(p)} for p in template_params],
-        })
+    components = {
+        param_name: {
+            "type": "text",
+            "value": str(value),
+            "parameter_name": param_name,
+        }
+        for param_name, value in (template_params or {}).items()
+    }
 
     payload = {
         "integrated_number": formatted_from,
         "content_type": "template",
-        "payload": [
-            {
-                "to": formatted_to,
-                "type": "template",
-                "template": {
-                    "name": template_name,
-                    "language": {
-                        "code": language_code,
-                        "policy": "deterministic"
-                    },
-                    "components": components,
-                }
+        "payload": {
+            "messaging_product": "whatsapp",
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {
+                    "code": language_code,
+                    "policy": "deterministic"
+                },
+                "namespace": None,
+                "to_and_components": [
+                    {
+                        "to": [formatted_to],
+                        "components": components,
+                    }
+                ],
             }
-        ]
+        }
     }
 
     headers = {
