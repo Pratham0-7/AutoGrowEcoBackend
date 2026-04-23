@@ -155,6 +155,8 @@ def send_bulk_whatsapp(company_id):
 
         auth_key = _PLATFORM_WA_KEY or None
         template_name = str(company.get("wa_template_name", "")).strip()
+        if not template_name:
+            return jsonify({"error": "WhatsApp template name not configured. Bulk send requires a template."}), 400
 
         leads = list(leadCollection.find({
             "company_id": company_id,
@@ -190,21 +192,13 @@ def send_bulk_whatsapp(company_id):
             )
 
             try:
-                if template_name:
-                    result = send_whatsapp_template(
-                        phone=phone,
-                        template_name=template_name,
-                        template_params={"name": lead_name},
-                        integrated_number=integrated_number,
-                        auth_key=auth_key,
-                    )
-                else:
-                    result = send_whatsapp_text(
-                        phone=phone,
-                        message=personal_msg,
-                        integrated_number=integrated_number,
-                        auth_key=auth_key,
-                    )
+                result = send_whatsapp_template(
+                    phone=phone,
+                    template_name=template_name,
+                    template_params={"name": lead_name},
+                    integrated_number=integrated_number,
+                    auth_key=auth_key,
+                )
 
                 status = "sent" if result.get("ok") else "error"
 
