@@ -1,9 +1,16 @@
+import os
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from db import leadCollection, msgCollection, compCollection
 from services.whatsapp import send_whatsapp_text, send_whatsapp_template, format_phone_wa
+
+# Platform-level WhatsApp auth key — same MSG91 key used for SMS
+_PLATFORM_WA_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY") or os.getenv("MSG91_AUTH_KEY", "")
 
 whatsapp_bp = Blueprint("whatsapp", __name__)
 
@@ -64,7 +71,7 @@ def send_manual():
         if not company:
             return jsonify({"error": "Company not found"}), 404
 
-        auth_key = company.get("wa_auth_key", "") or None
+        auth_key = company.get("wa_auth_key", "") or _PLATFORM_WA_KEY or None
         integrated_number = company.get("wa_number", "")
         template_name = company.get("wa_template_name", "")
 
@@ -128,7 +135,7 @@ def send_bulk_whatsapp(company_id):
                 "error": "WhatsApp integrated number not configured. Go to Settings to set it up."
             }), 400
 
-        auth_key = company.get("wa_auth_key", "") or None
+        auth_key = company.get("wa_auth_key", "") or _PLATFORM_WA_KEY or None
         template_name = company.get("wa_template_name", "")
 
         leads = list(leadCollection.find({
