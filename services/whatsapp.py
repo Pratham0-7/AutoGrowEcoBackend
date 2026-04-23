@@ -4,17 +4,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PLATFORM_WA_AUTH_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY", os.getenv("MSG91_AUTH_KEY", ""))
+PLATFORM_WA_AUTH_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY") or os.getenv("MSG91_AUTH_KEY", "")
 
 
 def format_phone_wa(phone: str) -> str:
     """Normalize phone to 12-digit format (91XXXXXXXXXX) for WhatsApp."""
-    phone = str(phone).strip().replace(" ", "").replace("-", "").replace("+", "")
+    phone = str(phone or "").strip().replace(" ", "").replace("-", "").replace("+", "")
     if phone.startswith("91") and len(phone) == 12:
         return phone
     if len(phone) == 10:
         return f"91{phone}"
     return phone
+
+
+def _safe_json(resp):
+    try:
+        return resp.json()
+    except Exception:
+        return {"raw_text": resp.text}
 
 
 def send_whatsapp_text(
@@ -25,41 +32,79 @@ def send_whatsapp_text(
 ) -> dict:
     """
     Send a free-form WhatsApp text message via MSG91.
-    Works within the 24-hour customer service window or for approved utility messages.
+    Works only inside the 24-hour service window if MSG91/Meta allow it.
     """
     key = auth_key or PLATFORM_WA_AUTH_KEY
     if not key:
-        print("[WA] No auth key — skipped.", flush=True)
-        return {"type": "skipped", "message": "WhatsApp auth key not configured"}
-    if not integrated_number:
-        print("[WA] No integrated_number — skipped.", flush=True)
-        return {"type": "skipped", "message": "Integrated WhatsApp number not set"}
+        print("[WA] No auth key configured.", flush=True)
+        return {
+            "ok": False,
+            "type": "skipped",
+            "message": "WhatsApp auth key not configured"
+        }
 
-    formatted = format_phone_wa(phone)
+    if not integrated_number:
+        print("[WA] No integrated_number configured.", flush=True)
+        return {
+            "ok": False,
+            "type": "skipped",
+            "message": "Integrated WhatsApp number not set"
+        }
+
+    formatted_to = format_phone_wa(phone)
+    formatted_from = format_phone_wa(integrated_number)
+
     payload = {
-        "integrated_number": format_phone_wa(integrated_number),
+        "integrated_number": formatted_from,
         "content_type": "text",
-        "payload": [{
-            "to": formatted,
-            "type": "text",
-            "text": {"body": message},
-        }],
+        "payload": [
+            {
+                "to": formatted_to,
+                "type": "text",
+                "text": {
+                    "body": message
+                }
+            }
+        ]
     }
 
-    headers = {"authkey": key, "Content-Type": "application/json"}
+    headers = {
+        "authkey": key,
+        "Content-Type": "application/json"
+    }
+
     try:
         resp = requests.post(
             "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
             json=payload,
             headers=headers,
-            timeout=10,
+            timeout=20,
         )
-        result = resp.json()
-        print(f"[WA] Text → {formatted}: {result}", flush=True)
-        return result
+
+        result = _safe_json(resp)
+
+        print(f"[WA TEXT] HTTP {resp.status_code}", flush=True)
+        print(f"[WA TEXT] Payload: {payload}", flush=True)
+        print(f"[WA TEXT] Response: {result}", flush=True)
+
+        ok = 200 <= resp.status_code < 300
+
+        return {
+            "ok": ok,
+            "http_status": resp.status_code,
+            "type": "success" if ok else "error",
+            "message": result.get("message") or result.get("error") or result.get("raw_text") or "Unknown response",
+            "provider_response": result,
+        }
+
     except Exception as exc:
-        print(f"[WA] Error sending to {formatted}: {exc}", flush=True)
-        return {"type": "error", "message": str(exc)}
+        print(f"[WA TEXT] Exception: {exc}", flush=True)
+        return {
+            "ok": False,
+            "type": "error",
+            "message": str(exc),
+            "provider_response": {},
+        }
 
 
 def send_whatsapp_template(
@@ -72,49 +117,95 @@ def send_whatsapp_template(
 ) -> dict:
     """
     Send a WhatsApp template message via MSG91.
-    Required for business-initiated messages outside the 24-hour window.
+    Use this for business-initiated outbound messages.
     """
     key = auth_key or PLATFORM_WA_AUTH_KEY
     if not key:
-        return {"type": "skipped", "message": "WhatsApp auth key not configured"}
-    if not integrated_number:
-        return {"type": "skipped", "message": "Integrated WhatsApp number not set"}
-    if not template_name:
-        return {"type": "skipped", "message": "Template name not set"}
+        return {
+            "ok": False,
+            "type": "skipped",
+            "message": "WhatsApp auth key not configured"
+        }
 
-    formatted = format_phone_wa(phone)
+    if not integrated_number:
+        return {
+            "ok": False,
+            "type": "skipped",
+            "message": "Integrated WhatsApp number not set"
+        }
+
+    if not template_name:
+        return {
+            "ok": False,
+            "type": "skipped",
+            "message": "Template name not set"
+        }
+
+    formatted_to = format_phone_wa(phone)
+    formatted_from = format_phone_wa(integrated_number)
+
     components = []
     if template_params:
         components.append({
             "type": "body",
-            "parameters": [{"type": "text", "text": str(p)} for p in template_params],
+            "parameters": [
+                {"type": "text", "text": str(p)} for p in template_params
+            ],
         })
 
     payload = {
-        "integrated_number": format_phone_wa(integrated_number),
+        "integrated_number": formatted_from,
         "content_type": "template",
-        "payload": [{
-            "to": formatted,
-            "type": "template",
-            "template": {
-                "name": template_name,
-                "language": {"code": language_code, "policy": "deterministic"},
-                "components": components,
-            },
-        }],
+        "payload": [
+            {
+                "to": formatted_to,
+                "type": "template",
+                "template": {
+                    "name": template_name,
+                    "language": {
+                        "code": language_code,
+                        "policy": "deterministic"
+                    },
+                    "components": components,
+                }
+            }
+        ]
     }
 
-    headers = {"authkey": key, "Content-Type": "application/json"}
+    headers = {
+        "authkey": key,
+        "Content-Type": "application/json"
+    }
+
     try:
         resp = requests.post(
             "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
             json=payload,
             headers=headers,
-            timeout=10,
+            timeout=20,
         )
-        result = resp.json()
-        print(f"[WA] Template → {formatted}: {result}", flush=True)
-        return result
+
+        result = _safe_json(resp)
+
+        print(f"[WA TEMPLATE] HTTP {resp.status_code}", flush=True)
+        print(f"[WA TEMPLATE] Payload: {payload}", flush=True)
+        print(f"[WA TEMPLATE] Response: {result}", flush=True)
+
+        ok = 200 <= resp.status_code < 300
+
+        return {
+            "ok": ok,
+            "http_status": resp.status_code,
+            "type": "success" if ok else "error",
+            "message": result.get("message") or result.get("error") or result.get("raw_text") or "Unknown response",
+            "provider_response": result,
+        }
+
     except Exception as exc:
-        print(f"[WA] Error: {exc}", flush=True)
-        return {"type": "error", "message": str(exc)}
+        print(f"[WA TEMPLATE] Exception: {exc}", flush=True)
+        return {
+            "ok": False,
+            "type": "error",
+            "message": str(exc),
+            "provider_response": {},
+        }

@@ -9,7 +9,6 @@ load_dotenv()
 from db import leadCollection, msgCollection, compCollection
 from services.whatsapp import send_whatsapp_text, send_whatsapp_template, format_phone_wa
 
-# Platform-level WhatsApp auth key — same MSG91 key used for SMS
 _PLATFORM_WA_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY") or os.getenv("MSG91_AUTH_KEY", "")
 
 whatsapp_bp = Blueprint("whatsapp", __name__)
@@ -21,12 +20,13 @@ def get_wa_config(company_id):
         company = compCollection.find_one({"_id": ObjectId(company_id)})
         if not company:
             return jsonify({"error": "Company not found"}), 404
+
         return jsonify({
-            "wa_auth_key": company.get("wa_auth_key", ""),
             "wa_number": company.get("wa_number", ""),
             "wa_template_name": company.get("wa_template_name", ""),
             "wa_enabled": company.get("wa_enabled", False),
         }), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -36,12 +36,13 @@ def save_wa_config(company_id):
     try:
         data = request.json or {}
         update = {}
-        if "wa_auth_key" in data:
-            update["wa_auth_key"] = data["wa_auth_key"].strip()
+
         if "wa_number" in data:
-            update["wa_number"] = data["wa_number"].strip()
+            update["wa_number"] = str(data["wa_number"]).strip()
+
         if "wa_template_name" in data:
-            update["wa_template_name"] = data["wa_template_name"].strip()
+            update["wa_template_name"] = str(data["wa_template_name"]).strip()
+
         if "wa_enabled" in data:
             update["wa_enabled"] = bool(data["wa_enabled"])
 
@@ -50,6 +51,7 @@ def save_wa_config(company_id):
 
         compCollection.update_one({"_id": ObjectId(company_id)}, {"$set": update})
         return jsonify({"message": "WhatsApp config saved"}), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -58,11 +60,12 @@ def save_wa_config(company_id):
 def send_manual():
     try:
         data = request.json or {}
-        company_id = data.get("company_id", "").strip()
-        phone = data.get("phone", "").strip()
-        message = data.get("message", "").strip()
-        lead_id = data.get("lead_id", "")
-        lead_name = data.get("lead_name", "")
+
+        company_id = str(data.get("company_id", "")).strip()
+        phone = str(data.get("phone", "")).strip()
+        message = str(data.get("message", "")).strip()
+        lead_id = str(data.get("lead_id", "")).strip()
+        lead_name = str(data.get("lead_name", "")).strip()
 
         if not company_id or not phone or not message:
             return jsonify({"error": "company_id, phone, and message are required"}), 400
@@ -71,9 +74,15 @@ def send_manual():
         if not company:
             return jsonify({"error": "Company not found"}), 404
 
-        auth_key = company.get("wa_auth_key", "") or _PLATFORM_WA_KEY or None
-        integrated_number = company.get("wa_number", "")
-        template_name = company.get("wa_template_name", "")
+        auth_key = _PLATFORM_WA_KEY or None
+        integrated_number = str(company.get("wa_number", "")).strip()
+        template_name = str(company.get("wa_template_name", "")).strip()
+
+        print("[WA SEND MANUAL] company_id:", company_id, flush=True)
+        print("[WA SEND MANUAL] platform key exists:", bool(_PLATFORM_WA_KEY), flush=True)
+        print("[WA SEND MANUAL] final auth key exists:", bool(auth_key), flush=True)
+        print("[WA SEND MANUAL] integrated_number:", integrated_number, flush=True)
+        print("[WA SEND MANUAL] template_name:", template_name, flush=True)
 
         if template_name:
             result = send_whatsapp_template(
@@ -91,13 +100,14 @@ def send_manual():
                 auth_key=auth_key,
             )
 
-        wa_type = result.get("type", "")
-        if wa_type == "skipped":
-            return jsonify({"error": result.get("message", "WhatsApp skipped — check settings")}), 400
-        if wa_type == "error":
-            return jsonify({"error": result.get("message", "Send failed")}), 500
+        print("[WA SEND MANUAL] result:", result, flush=True)
 
-        status = "sent"
+        if not result.get("ok"):
+            return jsonify({
+                "error": result.get("message", "WhatsApp send failed"),
+                "provider_response": result.get("provider_response", {})
+            }), 400
+
         msgCollection.insert_one({
             "lead_id": lead_id,
             "lead_name": lead_name,
@@ -106,13 +116,18 @@ def send_manual():
             "phone": format_phone_wa(phone),
             "message": message,
             "sent_at": datetime.utcnow(),
-            "status": status,
+            "status": "sent",
             "message_type": "manual",
+            "provider_response": result.get("provider_response", {}),
         })
 
-        return jsonify({"message": "WhatsApp sent successfully"}), 200
+        return jsonify({
+            "message": "WhatsApp sent successfully",
+            "provider_response": result.get("provider_response", {})
+        }), 200
 
     except Exception as e:
+        print("[WA SEND MANUAL] Exception:", e, flush=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -120,7 +135,7 @@ def send_manual():
 def send_bulk_whatsapp(company_id):
     try:
         data = request.json or {}
-        message = data.get("message", "").strip()
+        message = str(data.get("message", "")).strip()
 
         if not message:
             return jsonify({"error": "Message is required"}), 400
@@ -129,21 +144,19 @@ def send_bulk_whatsapp(company_id):
         if not company:
             return jsonify({"error": "Company not found"}), 404
 
-        integrated_number = company.get("wa_number", "")
+        integrated_number = str(company.get("wa_number", "")).strip()
         if not integrated_number:
-            return jsonify({
-                "error": "WhatsApp integrated number not configured. Go to Settings to set it up."
-            }), 400
+            return jsonify({"error": "WhatsApp integrated number not configured"}), 400
 
-        auth_key = company.get("wa_auth_key", "") or _PLATFORM_WA_KEY or None
-        template_name = company.get("wa_template_name", "")
+        auth_key = _PLATFORM_WA_KEY or None
+        template_name = str(company.get("wa_template_name", "")).strip()
 
         leads = list(leadCollection.find({
             "company_id": company_id,
             "is_individual_followup": {"$ne": True},
         }))
 
-        leads_with_phone = [l for l in leads if l.get("phone")]
+        leads_with_phone = [l for l in leads if str(l.get("phone", "")).strip()]
         if not leads_with_phone:
             return jsonify({"error": "No leads with phone numbers found"}), 400
 
@@ -153,13 +166,13 @@ def send_bulk_whatsapp(company_id):
 
         for lead in leads_with_phone:
             lead_id_str = str(lead["_id"])
-            lead_name = lead.get("name", "")
-            phone = lead.get("phone", "")
+            lead_name = str(lead.get("name", "")).strip()
+            phone = str(lead.get("phone", "")).strip()
 
             personal_msg = (
                 message
                 .replace("{{name}}", lead_name)
-                .replace("{{their_company}}", lead.get("company", ""))
+                .replace("{{their_company}}", str(lead.get("company", "")).strip())
             )
 
             try:
@@ -179,8 +192,7 @@ def send_bulk_whatsapp(company_id):
                         auth_key=auth_key,
                     )
 
-                wa_type = result.get("type", "")
-                status = "error" if wa_type in ("error", "skipped") else "sent"
+                status = "sent" if result.get("ok") else "error"
 
                 msgCollection.insert_one({
                     "lead_id": lead_id_str,
@@ -192,19 +204,25 @@ def send_bulk_whatsapp(company_id):
                     "sent_at": now,
                     "status": status,
                     "message_type": "bulk",
+                    "provider_response": result.get("provider_response", {}),
                 })
 
-                if status == "sent":
+                if result.get("ok"):
                     count += 1
                 else:
                     failed.append({
                         "lead_id": lead_id_str,
                         "name": lead_name,
                         "reason": result.get("message", "Failed"),
+                        "provider_response": result.get("provider_response", {}),
                     })
 
             except Exception as e:
-                failed.append({"lead_id": lead_id_str, "name": lead_name, "reason": str(e)})
+                failed.append({
+                    "lead_id": lead_id_str,
+                    "name": lead_name,
+                    "reason": str(e),
+                })
 
         return jsonify({
             "message": f"{count} WhatsApp message{'s' if count != 1 else ''} sent",
