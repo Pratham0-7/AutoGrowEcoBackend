@@ -8,7 +8,6 @@ PLATFORM_WA_AUTH_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY") or os.getenv("MSG91_
 
 
 def format_phone_wa(phone: str) -> str:
-    """Normalize phone to 12-digit format (91XXXXXXXXXX) for WhatsApp."""
     phone = str(phone or "").strip().replace(" ", "").replace("-", "").replace("+", "")
     if phone.startswith("91") and len(phone) == 12:
         return phone
@@ -24,32 +23,14 @@ def _safe_json(resp):
         return {"raw_text": resp.text}
 
 
-def send_whatsapp_text(
-    phone: str,
-    message: str,
-    integrated_number: str,
-    auth_key: str = None,
-) -> dict:
-    """
-    Send a free-form WhatsApp text message via MSG91.
-    Works only inside the 24-hour service window if MSG91/Meta allow it.
-    """
+def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_key: str = None) -> dict:
     key = auth_key or PLATFORM_WA_AUTH_KEY
+
     if not key:
-        print("[WA] No auth key configured.", flush=True)
-        return {
-            "ok": False,
-            "type": "skipped",
-            "message": "WhatsApp auth key not configured"
-        }
+        return {"ok": False, "type": "skipped", "message": "WhatsApp auth key not configured"}
 
     if not integrated_number:
-        print("[WA] No integrated_number configured.", flush=True)
-        return {
-            "ok": False,
-            "type": "skipped",
-            "message": "Integrated WhatsApp number not set"
-        }
+        return {"ok": False, "type": "skipped", "message": "Integrated WhatsApp number not set"}
 
     formatted_to = format_phone_wa(phone)
     formatted_from = format_phone_wa(integrated_number)
@@ -115,31 +96,16 @@ def send_whatsapp_template(
     auth_key: str = None,
     language_code: str = "en",
 ) -> dict:
-    """
-    Send a WhatsApp template message via MSG91.
-    Use this for business-initiated outbound messages.
-    """
     key = auth_key or PLATFORM_WA_AUTH_KEY
+
     if not key:
-        return {
-            "ok": False,
-            "type": "skipped",
-            "message": "WhatsApp auth key not configured"
-        }
+        return {"ok": False, "type": "skipped", "message": "WhatsApp auth key not configured"}
 
     if not integrated_number:
-        return {
-            "ok": False,
-            "type": "skipped",
-            "message": "Integrated WhatsApp number not set"
-        }
+        return {"ok": False, "type": "skipped", "message": "Integrated WhatsApp number not set"}
 
     if not template_name:
-        return {
-            "ok": False,
-            "type": "skipped",
-            "message": "Template name not set"
-        }
+        return {"ok": False, "type": "skipped", "message": "Template name not set"}
 
     formatted_to = format_phone_wa(phone)
     formatted_from = format_phone_wa(integrated_number)
@@ -148,9 +114,7 @@ def send_whatsapp_template(
     if template_params:
         components.append({
             "type": "body",
-            "parameters": [
-                {"type": "text", "text": str(p)} for p in template_params
-            ],
+            "parameters": [{"type": "text", "text": str(p)} for p in template_params],
         })
 
     payload = {

@@ -156,7 +156,16 @@ def send_bulk_whatsapp(company_id):
             "is_individual_followup": {"$ne": True},
         }))
 
-        leads_with_phone = [l for l in leads if str(l.get("phone", "")).strip()]
+        def get_phone(lead):
+            return str(
+                lead.get("phone")
+                or lead.get("mobile")
+                or lead.get("phone_number")
+                or lead.get("contact_number")
+                or ""
+            ).strip()
+
+        leads_with_phone = [l for l in leads if get_phone(l)]
         if not leads_with_phone:
             return jsonify({"error": "No leads with phone numbers found"}), 400
 
@@ -167,7 +176,7 @@ def send_bulk_whatsapp(company_id):
         for lead in leads_with_phone:
             lead_id_str = str(lead["_id"])
             lead_name = str(lead.get("name", "")).strip()
-            phone = str(lead.get("phone", "")).strip()
+            phone = get_phone(lead)
 
             personal_msg = (
                 message
