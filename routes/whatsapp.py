@@ -81,6 +81,11 @@ def send_manual():
         print("[WA SEND MANUAL] company_id:", company_id, flush=True)
         print("[WA SEND MANUAL] platform key exists:", bool(_PLATFORM_WA_KEY), flush=True)
         print("[WA SEND MANUAL] final auth key exists:", bool(auth_key), flush=True)
+        print(
+            "[WA SEND MANUAL] auth key preview:",
+            f"{auth_key[:6]}...{auth_key[-4:]}" if auth_key else "None",
+            flush=True
+        )
         print("[WA SEND MANUAL] integrated_number:", integrated_number, flush=True)
         print("[WA SEND MANUAL] template_name:", template_name, flush=True)
 

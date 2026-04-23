@@ -74,7 +74,13 @@ def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_ke
             "ok": ok,
             "http_status": resp.status_code,
             "type": "success" if ok else "error",
-            "message": result.get("message") or result.get("error") or result.get("raw_text") or "Unknown response",
+            "message": (
+                result.get("message")
+                or result.get("error")
+                or result.get("errors")
+                or result.get("raw_text")
+                or "Unknown response"
+            ),
             "provider_response": result,
         }
 
@@ -161,7 +167,13 @@ def send_whatsapp_template(
             "ok": ok,
             "http_status": resp.status_code,
             "type": "success" if ok else "error",
-            "message": result.get("message") or result.get("error") or result.get("raw_text") or "Unknown response",
+            "message": (
+                result.get("message")
+                or result.get("error")
+                or result.get("errors")
+                or result.get("raw_text")
+                or "Unknown response"
+            ),
             "provider_response": result,
         }
 
