@@ -379,14 +379,20 @@ def _handle_status_update(metadata: dict, status: dict):
 
 @webhooks_bp.route("/webhooks/meta/whatsapp", methods=["GET"])
 def meta_whatsapp_webhook_verify():
-    mode = str(request.args.get("hub.mode", "")).strip()
-    verify_token = str(request.args.get("hub.verify_token", "")).strip()
-    challenge = str(request.args.get("hub.challenge", "")).strip()
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    expected_token = os.getenv("META_WEBHOOK_VERIFY_TOKEN")
 
-    if mode == "subscribe" and META_WEBHOOK_VERIFY_TOKEN and verify_token == META_WEBHOOK_VERIFY_TOKEN:
-        return challenge, 200
+    print("[META VERIFY] args:", dict(request.args), flush=True)
+    print("[META VERIFY] mode:", mode, flush=True)
+    print("[META VERIFY] token:", token, flush=True)
+    print("[META VERIFY] expected:", expected_token, flush=True)
+    print("[META VERIFY] challenge:", challenge, flush=True)
 
-    print("[META WEBHOOK] Verification failed", flush=True)
+    if token == expected_token and challenge:
+        return challenge, 200, {"Content-Type": "text/plain"}
+
     return jsonify({"error": "Verification failed"}), 403
 
 
