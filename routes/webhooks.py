@@ -5,17 +5,32 @@ import hmac
 import hashlib
 import base64
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.request import urlopen
 
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 
-from db import usersCollection, compCollection, leadCollection, campCollection, msgCollection
+from db import (
+    usersCollection,
+    compCollection,
+    leadCollection,
+    campCollection,
+    msgCollection,
+    waMessagesCollection,
+)
+from services.meta_cloud import format_phone_meta
 
 webhooks_bp = Blueprint("webhooks", __name__)
 
 CLERK_WEBHOOK_SECRET = os.getenv("CLERK_WEBHOOK_SECRET", "")
+META_WEBHOOK_VERIFY_TOKEN = os.getenv("META_WEBHOOK_VERIFY_TOKEN", "")
+META_STATUS_ORDER = {
+    "pending": 0,
+    "sent": 1,
+    "delivered": 2,
+    "read": 3,
+}
 
 
 def _verify_svix_signature() -> bool:
@@ -110,6 +125,291 @@ def _cascade_delete_by_clerk_id(clerk_user_id: str) -> dict:
         "messages_deleted": messages_deleted,
         "campaigns_deleted": campaigns_deleted,
     }
+
+
+def _parse_meta_timestamp(value) -> datetime:
+    try:
+        return datetime.utcfromtimestamp(int(value))
+    except Exception:
+        return datetime.utcnow()
+
+
+def _normalize_phone(phone: str) -> str:
+    return format_phone_meta(str(phone or "").strip())
+
+
+def _extract_body_preview(message: dict) -> str:
+    message_type = str(message.get("type", "")).strip().lower()
+
+    if message_type == "text":
+        return str(message.get("text", {}).get("body", "")).strip()
+    if message_type == "image":
+        return "[image]"
+    if message_type == "document":
+        return "[document]"
+    if message_type == "audio":
+        return "[audio]"
+    if message_type == "video":
+        return "[video]"
+    if message_type == "sticker":
+        return "[sticker]"
+    if message_type == "interactive":
+        return "[interactive reply]"
+    if message_type == "button":
+        return "[button reply]"
+    if message_type == "reaction":
+        return "[reaction]"
+    if message_type == "location":
+        return "[location]"
+    if message_type == "contacts":
+        return "[contact card]"
+
+    return "[unsupported message]"
+
+
+def _resolve_company_by_meta_phone_number_id(phone_number_id: str):
+    if not phone_number_id:
+        return None
+    return compCollection.find_one({"meta_phone_number_id": str(phone_number_id).strip()})
+
+
+def _find_lead_by_phone(company_id: str, phone: str):
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return None
+
+    leads = leadCollection.find(
+        {"company_id": company_id},
+        {"name": 1, "phone": 1, "mobile": 1, "phone_number": 1, "contact_number": 1, "whatsapp": 1, "whatsapp_number": 1},
+    )
+
+    for lead in leads:
+        for field in ("phone", "mobile", "phone_number", "contact_number", "whatsapp", "whatsapp_number"):
+            if _normalize_phone(lead.get(field, "")) == normalized:
+                return lead
+    return None
+
+
+def _pick_contact_name(contacts: list, wa_id: str) -> str:
+    for contact in contacts or []:
+        if str(contact.get("wa_id", "")).strip() == str(wa_id or "").strip():
+            return str(contact.get("profile", {}).get("name", "")).strip()
+    if contacts:
+        return str(contacts[0].get("profile", {}).get("name", "")).strip()
+    return ""
+
+
+def _resolve_status(current_status: str, incoming_status: str) -> str:
+    current = str(current_status or "pending").strip().lower()
+    incoming = str(incoming_status or "").strip().lower()
+
+    if incoming == "failed":
+        return current if current == "read" else "failed"
+    if incoming not in META_STATUS_ORDER:
+        return current
+    if current == "failed":
+        return incoming
+    return incoming if META_STATUS_ORDER[incoming] >= META_STATUS_ORDER.get(current, 0) else current
+
+
+def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
+    phone_number_id = str(metadata.get("phone_number_id", "")).strip()
+    company = _resolve_company_by_meta_phone_number_id(phone_number_id)
+    if not company:
+        print(f"[META WEBHOOK] Ignoring inbound message for unknown phone_number_id={phone_number_id}", flush=True)
+        return
+
+    company_id = str(company["_id"])
+    from_phone = _normalize_phone(message.get("from", ""))
+    meta_message_id = str(message.get("id", "")).strip()
+
+    if not meta_message_id or not from_phone:
+        print("[META WEBHOOK] Inbound message missing id or sender phone", flush=True)
+        return
+
+    if waMessagesCollection.find_one({"company_id": company_id, "meta_message_id": meta_message_id}):
+        print(f"[META WEBHOOK] Duplicate inbound message ignored: {meta_message_id}", flush=True)
+        return
+
+    received_at = _parse_meta_timestamp(message.get("timestamp"))
+    contact_name = _pick_contact_name(contacts, message.get("from", ""))
+    matched_lead = _find_lead_by_phone(company_id, from_phone)
+    body_preview = _extract_body_preview(message)
+    message_type = str(message.get("type", "text")).strip().lower() or "text"
+    to_phone = _normalize_phone(metadata.get("display_phone_number", ""))
+
+    log_doc = {
+        "company_id": company_id,
+        "lead_id": str(matched_lead["_id"]) if matched_lead else "",
+        "user_id": "",
+        "channel": "whatsapp",
+        "direction": "inbound",
+        "provider": "meta_cloud",
+        "contact_phone": from_phone,
+        "from_phone": from_phone,
+        "to_phone": to_phone,
+        "lead_name": str(matched_lead.get("name", "")).strip() if matched_lead else contact_name,
+        "from_name": contact_name,
+        "template_name": "",
+        "language_code": "",
+        "variables_used": {},
+        "body_preview": body_preview,
+        "message_type": message_type,
+        "meta_message_id": meta_message_id,
+        "provider_response": {},
+        "status": "received",
+        "status_timestamps": {"received": received_at},
+        "error_details": {},
+        "last_webhook_payload": {
+            "metadata": metadata,
+            "contacts": contacts,
+            "message": message,
+        },
+        "created_at": received_at,
+        "updated_at": received_at,
+    }
+    waMessagesCollection.insert_one(log_doc)
+
+    if matched_lead:
+        leadCollection.update_one(
+            {"_id": matched_lead["_id"]},
+            {"$set": {
+                "last_whatsapp_message_at": received_at,
+                "last_whatsapp_direction": "inbound",
+                "last_whatsapp_preview": body_preview,
+                "whatsapp_window_open_until": received_at + timedelta(hours=24),
+            }},
+        )
+
+
+def _handle_status_update(metadata: dict, status: dict):
+    phone_number_id = str(metadata.get("phone_number_id", "")).strip()
+    company = _resolve_company_by_meta_phone_number_id(phone_number_id)
+    if not company:
+        print(f"[META WEBHOOK] Ignoring status for unknown phone_number_id={phone_number_id}", flush=True)
+        return
+
+    company_id = str(company["_id"])
+    meta_message_id = str(status.get("id", "")).strip()
+    incoming_status = str(status.get("status", "")).strip().lower()
+    event_at = _parse_meta_timestamp(status.get("timestamp"))
+    contact_phone = _normalize_phone(status.get("recipient_id", ""))
+    business_phone = _normalize_phone(metadata.get("display_phone_number", ""))
+
+    if not meta_message_id:
+        print("[META WEBHOOK] Status event missing message id", flush=True)
+        return
+
+    existing = waMessagesCollection.find_one({
+        "company_id": company_id,
+        "provider": "meta_cloud",
+        "meta_message_id": meta_message_id,
+    })
+
+    error_details = {}
+    if incoming_status == "failed" and status.get("errors"):
+        first_error = status["errors"][0] if isinstance(status["errors"], list) and status["errors"] else {}
+        error_details = {
+            "code": first_error.get("code"),
+            "title": first_error.get("title"),
+            "message": first_error.get("message"),
+            "details": first_error.get("error_data", {}),
+        }
+
+    if not existing:
+        matched_lead = _find_lead_by_phone(company_id, contact_phone)
+        waMessagesCollection.insert_one({
+            "company_id": company_id,
+            "lead_id": str(matched_lead["_id"]) if matched_lead else "",
+            "user_id": "",
+            "channel": "whatsapp",
+            "direction": "outbound",
+            "provider": "meta_cloud",
+            "contact_phone": contact_phone,
+            "from_phone": business_phone,
+            "to_phone": contact_phone,
+            "lead_name": str(matched_lead.get("name", "")).strip() if matched_lead else "",
+            "from_name": "",
+            "template_name": "",
+            "language_code": "",
+            "variables_used": {},
+            "body_preview": "",
+            "message_type": "template",
+            "meta_message_id": meta_message_id,
+            "provider_response": {},
+            "status": _resolve_status("pending", incoming_status),
+            "status_timestamps": {incoming_status: event_at} if incoming_status else {},
+            "error_details": error_details,
+            "last_webhook_payload": {
+                "metadata": metadata,
+                "status": status,
+            },
+            "created_at": event_at,
+            "updated_at": event_at,
+        })
+        return
+
+    current_status = str(existing.get("status", "pending")).strip().lower()
+    final_status = _resolve_status(current_status, incoming_status)
+
+    set_fields = {
+        "contact_phone": contact_phone or existing.get("contact_phone", ""),
+        "from_phone": business_phone or existing.get("from_phone", ""),
+        "to_phone": contact_phone or existing.get("to_phone", ""),
+        "last_webhook_payload": {
+            "metadata": metadata,
+            "status": status,
+        },
+        "updated_at": event_at,
+    }
+
+    if final_status != current_status:
+        set_fields["status"] = final_status
+
+    if incoming_status:
+        set_fields[f"status_timestamps.{incoming_status}"] = event_at
+
+    if incoming_status == "failed" and final_status == "failed":
+        set_fields["error_details"] = error_details
+    elif incoming_status in {"sent", "delivered", "read"} and final_status in {"sent", "delivered", "read"}:
+        set_fields["error_details"] = {}
+
+    waMessagesCollection.update_one({"_id": existing["_id"]}, {"$set": set_fields})
+
+
+@webhooks_bp.route("/webhooks/meta/whatsapp", methods=["GET"])
+def meta_whatsapp_webhook_verify():
+    mode = str(request.args.get("hub.mode", "")).strip()
+    verify_token = str(request.args.get("hub.verify_token", "")).strip()
+    challenge = str(request.args.get("hub.challenge", "")).strip()
+
+    if mode == "subscribe" and META_WEBHOOK_VERIFY_TOKEN and verify_token == META_WEBHOOK_VERIFY_TOKEN:
+        return challenge, 200
+
+    print("[META WEBHOOK] Verification failed", flush=True)
+    return jsonify({"error": "Verification failed"}), 403
+
+
+@webhooks_bp.route("/webhooks/meta/whatsapp", methods=["POST"])
+def meta_whatsapp_webhook():
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        for entry in payload.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {}) or {}
+                metadata = value.get("metadata", {}) or {}
+                contacts = value.get("contacts", []) or []
+
+                for message in value.get("messages", []) or []:
+                    _handle_inbound_message(metadata, contacts, message)
+
+                for status in value.get("statuses", []) or []:
+                    _handle_status_update(metadata, status)
+    except Exception as exc:
+        print(f"[META WEBHOOK] Processing error: {exc}", flush=True)
+
+    return jsonify({"received": True}), 200
 
 
 @webhooks_bp.route("/webhooks/clerk", methods=["POST"])

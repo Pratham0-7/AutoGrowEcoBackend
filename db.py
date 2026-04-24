@@ -62,6 +62,16 @@ def ensure_indexes():
     except OperationFailure as e:
         errors.append(f"comp.created_by: {e.details.get('errmsg', str(e))}")
 
+    try:
+        compCollection.create_index(
+            [("meta_phone_number_id", ASCENDING)],
+            sparse=True,
+            name="company_meta_phone_number_id_idx",
+        )
+        print("[DB] Index OK: comp.meta_phone_number_id", flush=True)
+    except OperationFailure as e:
+        errors.append(f"comp.meta_phone_number_id: {e.details.get('errmsg', str(e))}")
+
     # Booking indexes
     try:
         bookingsCollection.create_index(
@@ -80,6 +90,26 @@ def ensure_indexes():
         print("[DB] Index OK: bookings.date_time_status", flush=True)
     except OperationFailure as e:
         errors.append(f"bookings.date_time_status: {e.details.get('errmsg', str(e))}")
+
+    # WhatsApp Meta message indexes
+    try:
+        waMessagesCollection.create_index(
+            [("company_id", ASCENDING), ("meta_message_id", ASCENDING)],
+            sparse=True,
+            name="wa_messages_company_meta_message_idx",
+        )
+        print("[DB] Index OK: wa_messages.company_meta_message", flush=True)
+    except OperationFailure as e:
+        errors.append(f"wa_messages.company_meta_message: {e.details.get('errmsg', str(e))}")
+
+    try:
+        waMessagesCollection.create_index(
+            [("company_id", ASCENDING), ("contact_phone", ASCENDING), ("created_at", ASCENDING)],
+            name="wa_messages_conversation_idx",
+        )
+        print("[DB] Index OK: wa_messages.conversation", flush=True)
+    except OperationFailure as e:
+        errors.append(f"wa_messages.conversation: {e.details.get('errmsg', str(e))}")
 
     if errors:
         print("[DB] Some indexes could not be created:", flush=True)

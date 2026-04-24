@@ -23,6 +23,55 @@ _PLATFORM_WA_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY") or os.getenv("MSG91_AUTH
 whatsapp_bp = Blueprint("whatsapp", __name__)
 
 
+def _build_meta_log_doc(
+    *,
+    company_id: str,
+    lead_id: str,
+    user_id: str,
+    phone: str,
+    lead_name: str,
+    template_name: str,
+    language_code: str,
+    variables_used: dict,
+    body_preview: str,
+    now: datetime,
+    direction: str = "outbound",
+    message_type: str = "template",
+    from_phone: str = "",
+    from_name: str = "",
+    meta_message_id: str | None = None,
+    status: str = "pending",
+):
+    contact_phone = format_phone_meta(phone)
+
+    return {
+        "company_id": company_id,
+        "lead_id": lead_id,
+        "user_id": user_id,
+        "channel": "whatsapp",
+        "direction": direction,
+        "provider": "meta_cloud",
+        "contact_phone": contact_phone,
+        "from_phone": from_phone,
+        "to_phone": contact_phone if direction == "outbound" else "",
+        "lead_name": lead_name,
+        "from_name": from_name,
+        "template_name": template_name,
+        "language_code": language_code,
+        "variables_used": variables_used or {},
+        "body_preview": body_preview,
+        "message_type": message_type,
+        "meta_message_id": meta_message_id,
+        "provider_response": {},
+        "status": status,
+        "status_timestamps": {status: now},
+        "error_details": {},
+        "last_webhook_payload": {},
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 @whatsapp_bp.route("/whatsapp/config/<company_id>", methods=["GET"])
 def get_wa_config(company_id):
     try:
@@ -383,25 +432,21 @@ def meta_send_template():
         now = datetime.utcnow()
 
         # Insert log immediately as "pending" so we always have a record
-        log_doc = {
-            "company_id": company_id,
-            "lead_id": lead_id,
-            "user_id": user_id,
-            "channel": "whatsapp",
-            "direction": "outbound",
-            "provider": "meta_cloud",
-            "to_phone": format_phone_meta(phone),
-            "lead_name": lead_name,
-            "template_name": template_name,
-            "language_code": language_code,
-            "variables_used": variables_used,
-            "body_preview": body_preview,
-            "meta_message_id": None,
-            "provider_response": {},
-            "status": "pending",
-            "created_at": now,
-            "updated_at": now,
-        }
+        log_doc = _build_meta_log_doc(
+            company_id=company_id,
+            lead_id=lead_id,
+            user_id=user_id,
+            phone=phone,
+            lead_name=lead_name,
+            template_name=template_name,
+            language_code=language_code,
+            variables_used=variables_used,
+            body_preview=body_preview,
+            now=now,
+            direction="outbound",
+            message_type="template",
+            status="pending",
+        )
         inserted = waMessagesCollection.insert_one(log_doc)
         log_id = inserted.inserted_id
 
@@ -415,13 +460,16 @@ def meta_send_template():
         )
 
         final_status = "sent" if result["ok"] else "failed"
+        final_status_at = datetime.utcnow()
         waMessagesCollection.update_one(
             {"_id": log_id},
             {"$set": {
                 "status": final_status,
                 "meta_message_id": result.get("meta_message_id"),
                 "provider_response": result.get("provider_response", {}),
-                "updated_at": datetime.utcnow(),
+                "error_details": {} if result["ok"] else {"message": result.get("message", "Meta send failed")},
+                f"status_timestamps.{final_status}": final_status_at,
+                "updated_at": final_status_at,
             }},
         )
 
@@ -450,8 +498,13 @@ def get_meta_messages(company_id):
         page = max(1, int(request.args.get("page", 1)))
         per_page = min(100, max(1, int(request.args.get("per_page", 20))))
         skip = (page - 1) * per_page
+        direction = str(request.args.get("direction", "outbound")).strip().lower()
+        if direction not in {"all", "inbound", "outbound"}:
+            direction = "outbound"
 
         query = {"company_id": company_id, "provider": "meta_cloud"}
+        if direction in {"inbound", "outbound"}:
+            query["direction"] = direction
         messages = list(
             waMessagesCollection.find(query)
             .sort("created_at", -1)
@@ -466,10 +519,13 @@ def get_meta_messages(company_id):
                 "id": str(msg["_id"]),
                 "lead_id": msg.get("lead_id", ""),
                 "lead_name": msg.get("lead_name", "Unknown"),
+                "contact_phone": msg.get("contact_phone", ""),
+                "from_phone": msg.get("from_phone", ""),
                 "to_phone": msg.get("to_phone", ""),
                 "template_name": msg.get("template_name", ""),
                 "variables_used": msg.get("variables_used", {}),
                 "body_preview": msg.get("body_preview", ""),
+                "message_type": msg.get("message_type", ""),
                 "meta_message_id": msg.get("meta_message_id", ""),
                 "status": msg.get("status", "pending"),
                 "direction": msg.get("direction", "outbound"),
