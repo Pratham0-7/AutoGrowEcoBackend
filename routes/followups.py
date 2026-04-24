@@ -16,6 +16,90 @@ from scheduler import send_followup
 followups_bp = Blueprint("followups", __name__)
 
 
+def normalize_followup_variables(raw_variables, company=None):
+    """
+    Supports both:
+    frontend old keys:
+    sender_name, company_service, value_prop, pain_point, cta
+
+    backend sequence keys:
+    your_name, product_service, help_with, main_problem, call_to_action
+    """
+    raw_variables = raw_variables or {}
+    company = company or {}
+
+    sender_email = company.get("sender_email", "")
+    website = company.get("website", "") or "ageautomation.in"
+    company_name = company.get("name", "")
+
+    variables = {
+        "your_name": (
+            raw_variables.get("your_name")
+            or raw_variables.get("sender_name")
+            or ""
+        ).strip(),
+        "product_service": (
+            raw_variables.get("product_service")
+            or raw_variables.get("company_service")
+            or ""
+        ).strip(),
+        "help_with": (
+            raw_variables.get("help_with")
+            or raw_variables.get("value_prop")
+            or ""
+        ).strip(),
+        "main_problem": (
+            raw_variables.get("main_problem")
+            or raw_variables.get("pain_point")
+            or ""
+        ).strip(),
+        "call_to_action": (
+            raw_variables.get("call_to_action")
+            or raw_variables.get("cta")
+            or ""
+        ).strip(),
+        "industry": (raw_variables.get("industry") or "").strip(),
+        "signature_title": (raw_variables.get("signature_title") or "Founder").strip(),
+        "website": (raw_variables.get("website") or website).strip(),
+        "sender_email": (raw_variables.get("sender_email") or sender_email).strip(),
+        "company": (raw_variables.get("company") or company_name).strip(),
+
+        # Keep old keys too for backward compatibility.
+        "sender_name": (
+            raw_variables.get("sender_name")
+            or raw_variables.get("your_name")
+            or ""
+        ).strip(),
+        "company_service": (
+            raw_variables.get("company_service")
+            or raw_variables.get("product_service")
+            or ""
+        ).strip(),
+        "value_prop": (
+            raw_variables.get("value_prop")
+            or raw_variables.get("help_with")
+            or ""
+        ).strip(),
+        "pain_point": (
+            raw_variables.get("pain_point")
+            or raw_variables.get("main_problem")
+            or ""
+        ).strip(),
+        "cta": (
+            raw_variables.get("cta")
+            or raw_variables.get("call_to_action")
+            or ""
+        ).strip(),
+    }
+
+    # Preserve any extra advanced variables
+    for key, value in raw_variables.items():
+        if key not in variables:
+            variables[key] = "" if value is None else str(value)
+
+    return variables
+
+
 @followups_bp.route("/respond/<lead_id>/<response>", methods=["GET"])
 def respond_to_lead(lead_id, response):
     def html_page(title, heading, subtext, accent):
@@ -58,11 +142,12 @@ def respond_to_lead(lead_id, response):
 @followups_bp.route("/send_bulk/<company_id>", methods=["POST"])
 def send_bulk(company_id):
     try:
-        data = request.json
+        data = request.json or {}
         send_type = data.get("type")
         interval_days = data.get("interval_days")
         subject = data.get("subject", "Follow-up from AGE")
         template = data.get("message", "")
+        raw_variables = data.get("variables", {})
 
         if send_type not in ["email", "sms", "both"]:
             return jsonify({"error": "Invalid send type"}), 400
@@ -74,6 +159,8 @@ def send_bulk(company_id):
         company = compCollection.find_one({"_id": ObjectId(company_id)})
         if not company:
             return jsonify({"error": "Company not found"}), 404
+
+        variables = normalize_followup_variables(raw_variables, company)
 
         sender_email = company.get("sender_email", "")
         if send_type in ["email", "both"] and not sender_email:
@@ -87,8 +174,12 @@ def send_bulk(company_id):
             "interval_days": interval_days,
             "message": template,
             "subject": subject,
+            "variables": variables,
             "is_active": True,
+            "is_recurring": True,
+            "is_sequence": False,
             "created_at": now,
+            "updated_at": now,
         }
 
         campaign_result = campCollection.insert_one(campaign)
@@ -112,7 +203,7 @@ def send_bulk(company_id):
 
         for lead in leads:
             lead_id_str = str(lead["_id"])
-            final_message = render_message(template, lead)
+            final_message = render_message(template, lead, variables)
             yes_link, no_link = build_response_links(lead_id_str)
             text_body = f"{final_message}\n\nYes: {yes_link}\nNo: {no_link}"
             html_body = build_email_html(final_message, yes_link, no_link)
@@ -120,7 +211,11 @@ def send_bulk(company_id):
             try:
                 if send_type in ["email", "both"]:
                     if not lead.get("email"):
-                        failed.append({"lead_id": lead_id_str, "name": lead.get("name", ""), "reason": "Missing email"})
+                        failed.append({
+                            "lead_id": lead_id_str,
+                            "name": lead.get("name", ""),
+                            "reason": "Missing email"
+                        })
                         continue
 
                     send_email_ses(
@@ -146,6 +241,7 @@ def send_bulk(company_id):
                 msgCollection.insert_one({
                     "lead_id": lead_id_str,
                     "company_id": company_id,
+                    "campaign_id": str(campaign_id),
                     "channel": send_type,
                     "message": final_message,
                     "subject": subject,
@@ -164,6 +260,7 @@ def send_bulk(company_id):
                         "followup_count": 1,
                         "last_followup_sent_at": now,
                         "next_followup_at": now + timedelta(days=campaign["interval_days"]),
+                        "response_status": "pending",
                     }}
                 )
 
@@ -193,6 +290,7 @@ def start_followup(lead_id):
         message = data.get("message", "").strip()
         channel = data.get("channel")
         interval_days = int(data.get("interval_days", 2))
+        raw_variables = data.get("variables", {})
 
         if not message:
             return jsonify({"error": "Message is required"}), 400
@@ -207,6 +305,12 @@ def start_followup(lead_id):
         if channel in ["email", "both"] and not lead.get("email"):
             return jsonify({"error": "This lead has no email address"}), 400
 
+        company = compCollection.find_one({"_id": ObjectId(lead["company_id"])})
+        if not company:
+            return jsonify({"error": "Company not found"}), 404
+
+        variables = normalize_followup_variables(raw_variables, company)
+
         now = datetime.utcnow()
 
         campaign = {
@@ -215,9 +319,12 @@ def start_followup(lead_id):
             "interval_days": interval_days,
             "message": message,
             "subject": subject,
+            "variables": variables,
             "is_active": True,
             "is_recurring": True,
+            "is_sequence": False,
             "created_at": now,
+            "updated_at": now,
         }
 
         campaign_result = campCollection.insert_one(campaign)

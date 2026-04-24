@@ -66,6 +66,8 @@ def send_followup(lead, campaign):
         variables = dict(campaign.get("variables", {}))
         if company:
             variables.setdefault("company", company.get("name", ""))
+            variables.setdefault("sender_email", company.get("sender_email", ""))
+            variables.setdefault("website", company.get("website", "") or "ageautomation.in")
 
         print(f"[SCHEDULER] Sequence step {current_step_number}/{total_steps} for lead {lead_id_str}")
 
@@ -75,7 +77,12 @@ def send_followup(lead, campaign):
         message_template = campaign.get("message", "")
         subject = campaign.get("subject", "Follow-up from AGE")
         channel = campaign.get("channel", "email")
-        variables = None
+
+        variables = dict(campaign.get("variables", {}))
+        if company:
+            variables.setdefault("company", company.get("name", ""))
+            variables.setdefault("sender_email", company.get("sender_email", ""))
+            variables.setdefault("website", company.get("website", "") or "ageautomation.in")
 
         if lead.get("is_individual_followup") and lead.get("pref_interval_days"):
             channel = lead.get("pref_channel", channel)
@@ -132,6 +139,7 @@ def send_followup(lead, campaign):
     msgCollection.insert_one({
         "lead_id": lead_id_str,
         "company_id": lead["company_id"],
+        "campaign_id": str(campaign_id),
         "channel": channel,
         "message": final_message,
         "subject": subject,
