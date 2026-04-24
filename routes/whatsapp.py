@@ -6,8 +6,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from db import leadCollection, msgCollection, compCollection
+from db import leadCollection, msgCollection, compCollection, waMessagesCollection
 from services.whatsapp import send_whatsapp_text, send_whatsapp_template, format_phone_wa
+from services.meta_cloud import (
+    send_meta_template,
+    build_components,
+    format_phone_meta,
+    PREBUILT_TEMPLATES,
+)
+
+_PLATFORM_META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "")
+_PLATFORM_META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 
 _PLATFORM_WA_KEY = os.getenv("MSG91_WHATSAPP_AUTH_KEY") or os.getenv("MSG91_AUTH_KEY", "")
 
@@ -274,6 +283,198 @@ def get_wa_messages(company_id):
                 "status": msg.get("status", ""),
                 "message_type": msg.get("message_type", ""),
                 "sent_at": msg["sent_at"].isoformat() if msg.get("sent_at") else "",
+            })
+
+        return jsonify({
+            "messages": result,
+            "total": total,
+            "page": page,
+            "pages": max(1, -(-total // per_page)),
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Meta Cloud API routes ─────────────────────────────────────────────────────
+
+
+@whatsapp_bp.route("/whatsapp/meta/templates", methods=["GET"])
+def get_meta_templates():
+    return jsonify({"templates": PREBUILT_TEMPLATES}), 200
+
+
+@whatsapp_bp.route("/whatsapp/meta/config/<company_id>", methods=["GET"])
+def get_meta_config(company_id):
+    try:
+        company = compCollection.find_one({"_id": ObjectId(company_id)})
+        if not company:
+            return jsonify({"error": "Company not found"}), 404
+
+        return jsonify({
+            "meta_phone_number_id": company.get("meta_phone_number_id", ""),
+            "meta_access_token": company.get("meta_access_token", ""),
+            "meta_waba_id": company.get("meta_waba_id", ""),
+            "meta_enabled": company.get("meta_enabled", False),
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@whatsapp_bp.route("/whatsapp/meta/config/<company_id>", methods=["POST"])
+def save_meta_config(company_id):
+    try:
+        data = request.json or {}
+        update = {}
+
+        for field in ("meta_phone_number_id", "meta_access_token", "meta_waba_id"):
+            if field in data:
+                update[field] = str(data[field]).strip()
+
+        if "meta_enabled" in data:
+            update["meta_enabled"] = bool(data["meta_enabled"])
+
+        if not update:
+            return jsonify({"error": "No fields to update"}), 400
+
+        compCollection.update_one({"_id": ObjectId(company_id)}, {"$set": update})
+        return jsonify({"message": "Meta Cloud config saved"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@whatsapp_bp.route("/whatsapp/meta/send_template", methods=["POST"])
+def meta_send_template():
+    try:
+        data = request.json or {}
+
+        company_id = str(data.get("company_id", "")).strip()
+        lead_id = str(data.get("lead_id", "")).strip()
+        user_id = str(data.get("user_id", "")).strip()
+        phone = str(data.get("phone", "")).strip()
+        lead_name = str(data.get("lead_name", "")).strip()
+        template_name = str(data.get("template_name", "")).strip()
+        language_code = str(data.get("language_code", "en")).strip()
+        variables_used = data.get("variables_used", {})
+        body_preview = str(data.get("body_preview", "")).strip()
+
+        if not company_id:
+            return jsonify({"error": "company_id is required"}), 400
+        if not phone:
+            return jsonify({"error": "phone is required"}), 400
+        if not template_name:
+            return jsonify({"error": "template_name is required"}), 400
+
+        company = compCollection.find_one({"_id": ObjectId(company_id)})
+        if not company:
+            return jsonify({"error": "Company not found"}), 404
+
+        # Per-company credentials take priority; fall back to platform-level env vars
+        phone_number_id = str(company.get("meta_phone_number_id", "")).strip() or _PLATFORM_META_PHONE_NUMBER_ID
+        access_token = str(company.get("meta_access_token", "")).strip() or _PLATFORM_META_ACCESS_TOKEN
+
+        print(f"[META SEND] company={company_id} phone={phone} template={template_name}", flush=True)
+        print(f"[META SEND] phone_number_id exists: {bool(phone_number_id)}", flush=True)
+
+        components = build_components(variables_used) if variables_used else None
+
+        now = datetime.utcnow()
+
+        # Insert log immediately as "pending" so we always have a record
+        log_doc = {
+            "company_id": company_id,
+            "lead_id": lead_id,
+            "user_id": user_id,
+            "channel": "whatsapp",
+            "direction": "outbound",
+            "provider": "meta_cloud",
+            "to_phone": format_phone_meta(phone),
+            "lead_name": lead_name,
+            "template_name": template_name,
+            "language_code": language_code,
+            "variables_used": variables_used,
+            "body_preview": body_preview,
+            "meta_message_id": None,
+            "provider_response": {},
+            "status": "pending",
+            "created_at": now,
+            "updated_at": now,
+        }
+        inserted = waMessagesCollection.insert_one(log_doc)
+        log_id = inserted.inserted_id
+
+        result = send_meta_template(
+            phone_number_id=phone_number_id,
+            access_token=access_token,
+            to_phone=phone,
+            template_name=template_name,
+            language_code=language_code,
+            components=components,
+        )
+
+        final_status = "sent" if result["ok"] else "failed"
+        waMessagesCollection.update_one(
+            {"_id": log_id},
+            {"$set": {
+                "status": final_status,
+                "meta_message_id": result.get("meta_message_id"),
+                "provider_response": result.get("provider_response", {}),
+                "updated_at": datetime.utcnow(),
+            }},
+        )
+
+        if not result["ok"]:
+            return jsonify({
+                "error": result.get("message", "Meta send failed"),
+                "provider_response": result.get("provider_response", {}),
+                "log_id": str(log_id),
+            }), 400
+
+        return jsonify({
+            "message": "Template sent via Meta Cloud API",
+            "meta_message_id": result["meta_message_id"],
+            "log_id": str(log_id),
+            "status": "sent",
+        }), 200
+
+    except Exception as e:
+        print(f"[META SEND] Exception: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@whatsapp_bp.route("/whatsapp/meta/messages/<company_id>", methods=["GET"])
+def get_meta_messages(company_id):
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = min(100, max(1, int(request.args.get("per_page", 20))))
+        skip = (page - 1) * per_page
+
+        query = {"company_id": company_id, "provider": "meta_cloud"}
+        messages = list(
+            waMessagesCollection.find(query)
+            .sort("created_at", -1)
+            .skip(skip)
+            .limit(per_page)
+        )
+        total = waMessagesCollection.count_documents(query)
+
+        result = []
+        for msg in messages:
+            result.append({
+                "id": str(msg["_id"]),
+                "lead_id": msg.get("lead_id", ""),
+                "lead_name": msg.get("lead_name", "Unknown"),
+                "to_phone": msg.get("to_phone", ""),
+                "template_name": msg.get("template_name", ""),
+                "variables_used": msg.get("variables_used", {}),
+                "body_preview": msg.get("body_preview", ""),
+                "meta_message_id": msg.get("meta_message_id", ""),
+                "status": msg.get("status", "pending"),
+                "direction": msg.get("direction", "outbound"),
+                "user_id": msg.get("user_id", ""),
+                "created_at": msg["created_at"].isoformat() if msg.get("created_at") else "",
             })
 
         return jsonify({

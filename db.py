@@ -19,6 +19,7 @@ campCollection = db["campaigns"]
 msgCollection = db["messages"]
 stepCollection = db["steps"]
 bookingsCollection = db["bookings"]
+waMessagesCollection = db["wa_messages"]
 
 
 def ensure_indexes():
