@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from db import leadCollection, msgCollection, compCollection, waMessagesCollection
+from db import leadCollection, msgCollection, compCollection, waMessagesCollection, usersCollection
 from services.whatsapp import send_whatsapp_text, send_whatsapp_template, format_phone_wa
 from services.meta_cloud import (
     send_meta_template,
@@ -539,6 +539,111 @@ def get_meta_messages(company_id):
             "page": page,
             "pages": max(1, -(-total // per_page)),
         }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@whatsapp_bp.route("/whatsapp/meta/conversations/<company_id>", methods=["GET"])
+def get_meta_conversations(company_id):
+    try:
+        pipeline = [
+            {"$match": {"company_id": company_id, "provider": "meta_cloud"}},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id":            "$contact_phone",
+                "contact_phone":  {"$first": "$contact_phone"},
+                "lead_id":        {"$first": "$lead_id"},
+                "lead_name":      {"$first": "$lead_name"},
+                "last_body":      {"$first": "$body_preview"},
+                "last_direction": {"$first": "$direction"},
+                "last_status":    {"$first": "$status"},
+                "last_at":        {"$first": "$created_at"},
+                "inbound_count":  {"$sum": {"$cond": [{"$eq": ["$direction", "inbound"]}, 1, 0]}},
+                "total_count":    {"$sum": 1},
+            }},
+            {"$sort": {"last_at": -1}},
+        ]
+        conversations = list(waMessagesCollection.aggregate(pipeline))
+
+        result = []
+        for conv in conversations:
+            last_dir = conv.get("last_direction", "outbound")
+            inbound_count = conv.get("inbound_count", 0)
+
+            if last_dir == "inbound":
+                conv_status = "unread"
+            elif inbound_count > 0:
+                conv_status = "replied"
+            else:
+                conv_status = "no_reply"
+
+            assigned_to = ""
+            lead_id = conv.get("lead_id", "")
+            if lead_id:
+                try:
+                    lead = leadCollection.find_one({"_id": ObjectId(lead_id)}, {"uploaded_by": 1})
+                    if lead:
+                        ub = lead.get("uploaded_by", "")
+                        if ub and ub != "gsheet_sync":
+                            user_q = {"_id": ObjectId(ub)} if ObjectId.is_valid(ub) else {"clerk_user_id": ub}
+                            user = usersCollection.find_one(user_q, {"name": 1})
+                            if user:
+                                assigned_to = user.get("name", "")
+                except Exception:
+                    pass
+
+            result.append({
+                "contact_phone":  conv.get("contact_phone", ""),
+                "lead_id":        lead_id,
+                "lead_name":      conv.get("lead_name", "Unknown"),
+                "last_body":      conv.get("last_body", ""),
+                "last_direction": last_dir,
+                "last_status":    conv.get("last_status", ""),
+                "last_at":        conv.get("last_at").isoformat() if conv.get("last_at") else "",
+                "inbound_count":  inbound_count,
+                "total_count":    conv.get("total_count", 0),
+                "status":         conv_status,
+                "assigned_to":    assigned_to,
+            })
+
+        return jsonify({"conversations": result, "total": len(result)}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@whatsapp_bp.route("/whatsapp/meta/thread/<company_id>/<path:contact_phone>", methods=["GET"])
+def get_meta_thread(company_id, contact_phone):
+    try:
+        messages = list(
+            waMessagesCollection.find({
+                "company_id":    company_id,
+                "provider":      "meta_cloud",
+                "contact_phone": contact_phone,
+            }).sort("created_at", 1)
+        )
+
+        result = []
+        for msg in messages:
+            st = {}
+            for k, v in msg.get("status_timestamps", {}).items():
+                st[k] = v.isoformat() if hasattr(v, "isoformat") else str(v)
+            result.append({
+                "id":                str(msg["_id"]),
+                "direction":         msg.get("direction", "outbound"),
+                "body_preview":      msg.get("body_preview", ""),
+                "template_name":     msg.get("template_name", ""),
+                "message_type":      msg.get("message_type", ""),
+                "status":            msg.get("status", "pending"),
+                "meta_message_id":   msg.get("meta_message_id", ""),
+                "user_id":           msg.get("user_id", ""),
+                "from_name":         msg.get("from_name", ""),
+                "created_at":        msg["created_at"].isoformat() if msg.get("created_at") else "",
+                "status_timestamps": st,
+            })
+
+        return jsonify({"messages": result, "total": len(result)}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
