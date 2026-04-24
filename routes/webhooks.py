@@ -173,6 +173,66 @@ def _resolve_company_by_meta_phone_number_id(phone_number_id: str):
     return compCollection.find_one({"meta_phone_number_id": str(phone_number_id).strip()})
 
 
+def _load_company_by_company_id(company_id: str):
+    try:
+        return compCollection.find_one({"_id": ObjectId(str(company_id))})
+    except Exception:
+        return None
+
+
+def _resolve_company_for_inbound(phone_number_id: str, from_phone: str):
+    company = _resolve_company_by_meta_phone_number_id(phone_number_id)
+    if company:
+        return company
+
+    normalized_from = _normalize_phone(from_phone)
+    if not normalized_from:
+        return None
+
+    recent_message = waMessagesCollection.find_one(
+        {
+            "provider": "meta_cloud",
+            "contact_phone": normalized_from,
+        },
+        sort=[("created_at", -1)],
+    )
+    if not recent_message:
+        return None
+
+    fallback_company = _load_company_by_company_id(recent_message.get("company_id", ""))
+    if fallback_company:
+        print(
+            f"[META WEBHOOK] Fallback inbound company match via contact_phone={normalized_from} "
+            f"company_id={recent_message.get('company_id')}",
+            flush=True,
+        )
+    return fallback_company
+
+
+def _resolve_company_for_status(phone_number_id: str, meta_message_id: str):
+    company = _resolve_company_by_meta_phone_number_id(phone_number_id)
+    if company:
+        return company
+
+    existing_message = waMessagesCollection.find_one(
+        {
+            "provider": "meta_cloud",
+            "meta_message_id": str(meta_message_id or "").strip(),
+        }
+    )
+    if not existing_message:
+        return None
+
+    fallback_company = _load_company_by_company_id(existing_message.get("company_id", ""))
+    if fallback_company:
+        print(
+            f"[META WEBHOOK] Fallback status company match via meta_message_id={meta_message_id} "
+            f"company_id={existing_message.get('company_id')}",
+            flush=True,
+        )
+    return fallback_company
+
+
 def _find_lead_by_phone(company_id: str, phone: str):
     normalized = _normalize_phone(phone)
     if not normalized:
@@ -214,20 +274,24 @@ def _resolve_status(current_status: str, incoming_status: str) -> str:
 
 def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
     phone_number_id = str(metadata.get("phone_number_id", "")).strip()
-    company = _resolve_company_by_meta_phone_number_id(phone_number_id)
+    from_phone = _normalize_phone(message.get("from", ""))
+    company = _resolve_company_for_inbound(phone_number_id, from_phone)
     if not company:
-        print(f"[META WEBHOOK] Ignoring inbound message for unknown phone_number_id={phone_number_id}", flush=True)
+        print(
+            f"[META WEBHOOK] Ignoring inbound message for unknown phone_number_id={phone_number_id} "
+            f"from_phone={from_phone}",
+            flush=True,
+        )
         return
 
     company_id = str(company["_id"])
-    from_phone = _normalize_phone(message.get("from", ""))
     meta_message_id = str(message.get("id", "")).strip()
 
     if not meta_message_id or not from_phone:
         print("[META WEBHOOK] Inbound message missing id or sender phone", flush=True)
         return
 
-    if waMessagesCollection.find_one({"company_id": company_id, "meta_message_id": meta_message_id}):
+    if waMessagesCollection.find_one({"provider": "meta_cloud", "meta_message_id": meta_message_id}):
         print(f"[META WEBHOOK] Duplicate inbound message ignored: {meta_message_id}", flush=True)
         return
 
@@ -284,13 +348,17 @@ def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
 
 def _handle_status_update(metadata: dict, status: dict):
     phone_number_id = str(metadata.get("phone_number_id", "")).strip()
-    company = _resolve_company_by_meta_phone_number_id(phone_number_id)
+    meta_message_id = str(status.get("id", "")).strip()
+    company = _resolve_company_for_status(phone_number_id, meta_message_id)
     if not company:
-        print(f"[META WEBHOOK] Ignoring status for unknown phone_number_id={phone_number_id}", flush=True)
+        print(
+            f"[META WEBHOOK] Ignoring status for unknown phone_number_id={phone_number_id} "
+            f"meta_message_id={meta_message_id}",
+            flush=True,
+        )
         return
 
     company_id = str(company["_id"])
-    meta_message_id = str(status.get("id", "")).strip()
     incoming_status = str(status.get("status", "")).strip().lower()
     event_at = _parse_meta_timestamp(status.get("timestamp"))
     contact_phone = _normalize_phone(status.get("recipient_id", ""))
@@ -305,6 +373,11 @@ def _handle_status_update(metadata: dict, status: dict):
         "provider": "meta_cloud",
         "meta_message_id": meta_message_id,
     })
+    if not existing:
+        existing = waMessagesCollection.find_one({
+            "provider": "meta_cloud",
+            "meta_message_id": meta_message_id,
+        })
 
     error_details = {}
     if incoming_status == "failed" and status.get("errors"):
@@ -378,6 +451,7 @@ def _handle_status_update(metadata: dict, status: dict):
 
 
 @webhooks_bp.route("/webhooks/meta/whatsapp", methods=["GET"])
+@webhooks_bp.route("/meta/whatsapp", methods=["GET"])
 def meta_whatsapp_webhook_verify():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
@@ -397,20 +471,35 @@ def meta_whatsapp_webhook_verify():
 
 
 @webhooks_bp.route("/webhooks/meta/whatsapp", methods=["POST"])
+@webhooks_bp.route("/meta/whatsapp", methods=["POST"])
 def meta_whatsapp_webhook():
     payload = request.get_json(silent=True) or {}
 
     try:
+        entry_count = len(payload.get("entry", []) or [])
+        print(f"[META WEBHOOK] Received payload with {entry_count} entr{'y' if entry_count == 1 else 'ies'}", flush=True)
+
         for entry in payload.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {}) or {}
                 metadata = value.get("metadata", {}) or {}
                 contacts = value.get("contacts", []) or []
+                messages = value.get("messages", []) or []
+                statuses = value.get("statuses", []) or []
 
-                for message in value.get("messages", []) or []:
+                print(
+                    "[META WEBHOOK] change"
+                    f" phone_number_id={metadata.get('phone_number_id', '')}"
+                    f" display_phone_number={metadata.get('display_phone_number', '')}"
+                    f" messages={len(messages)}"
+                    f" statuses={len(statuses)}",
+                    flush=True,
+                )
+
+                for message in messages:
                     _handle_inbound_message(metadata, contacts, message)
 
-                for status in value.get("statuses", []) or []:
+                for status in statuses:
                     _handle_status_update(metadata, status)
     except Exception as exc:
         print(f"[META WEBHOOK] Processing error: {exc}", flush=True)
