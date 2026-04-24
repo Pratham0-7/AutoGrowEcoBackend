@@ -38,13 +38,15 @@ def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_ke
     payload = {
         "integrated_number": formatted_from,
         "content_type": "text",
-        "payload": {
-            "to": formatted_to,
-            "type": "text",
-            "text": {
-                "body": message
+        "payload": [
+            {
+                "to": formatted_to,
+                "type": "text",
+                "text": {
+                    "body": message
+                }
             }
-        }
+        ]
     }
 
     headers = {
@@ -54,7 +56,7 @@ def send_whatsapp_text(phone: str, message: str, integrated_number: str, auth_ke
 
     try:
         resp = requests.post(
-            "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/",
+            "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
             json=payload,
             headers=headers,
             timeout=20,
