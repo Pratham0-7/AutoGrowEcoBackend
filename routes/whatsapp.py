@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -602,6 +602,24 @@ def get_meta_conversations(company_id):
                             window_until = wu.isoformat()
                 except Exception:
                     pass
+
+            # Fallback: if lead had no whatsapp_window_open_until, derive from
+            # the latest inbound message timestamp + 24 h
+            if not window_open:
+                latest_inbound = waMessagesCollection.find_one(
+                    {
+                        "company_id":    company_id,
+                        "provider":      "meta_cloud",
+                        "contact_phone": conv.get("contact_phone", ""),
+                        "direction":     "inbound",
+                    },
+                    sort=[("created_at", -1)],
+                )
+                if latest_inbound:
+                    ts = latest_inbound.get("created_at")
+                    if ts and ts + timedelta(hours=24) > datetime.utcnow():
+                        window_open  = True
+                        window_until = (ts + timedelta(hours=24)).isoformat()
 
             result.append({
                 "contact_phone":  conv.get("contact_phone", ""),

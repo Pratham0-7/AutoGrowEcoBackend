@@ -240,11 +240,13 @@ def _find_lead_by_phone(company_id: str, phone: str):
 
     leads = leadCollection.find(
         {"company_id": company_id},
-        {"name": 1, "phone": 1, "mobile": 1, "phone_number": 1, "contact_number": 1, "whatsapp": 1, "whatsapp_number": 1},
+        {"name": 1, "phone": 1, "mobile": 1, "phone_number": 1, "contact_number": 1,
+         "contact_phone": 1, "whatsapp": 1, "whatsapp_number": 1},
     )
 
     for lead in leads:
-        for field in ("phone", "mobile", "phone_number", "contact_number", "whatsapp", "whatsapp_number"):
+        for field in ("phone", "mobile", "phone_number", "contact_number",
+                      "contact_phone", "whatsapp", "whatsapp_number"):
             if _normalize_phone(lead.get(field, "")) == normalized:
                 return lead
     return None
