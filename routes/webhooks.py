@@ -24,16 +24,19 @@ from services.meta_cloud import format_phone_meta
 webhooks_bp = Blueprint("webhooks", __name__)
 
 CLERK_WEBHOOK_SECRET = os.getenv("CLERK_WEBHOOK_SECRET", "")
-META_WEBHOOK_VERIFY_TOKEN = os.getenv("META_WEBHOOK_VERIFY_TOKEN", "")
 META_STATUS_ORDER = {
     "pending": 0,
     "sent": 1,
     "delivered": 2,
     "read": 3,
 }
-# "received" is the terminal status for inbound messages — never replace it with outbound status codes
+
 _INBOUND_STATUSES = {"received"}
 
+
+# ─────────────────────────────────────────────────────────────
+# Clerk helpers
+# ─────────────────────────────────────────────────────────────
 
 def _verify_svix_signature() -> bool:
     """
@@ -54,7 +57,7 @@ def _verify_svix_signature() -> bool:
         print("[WEBHOOK] Invalid CLERK_WEBHOOK_SECRET (bad base64)", flush=True)
         return False
 
-    svix_id        = request.headers.get("svix-id", "")
+    svix_id = request.headers.get("svix-id", "")
     svix_timestamp = request.headers.get("svix-timestamp", "")
     svix_signature = request.headers.get("svix-signature", "")
 
@@ -62,7 +65,6 @@ def _verify_svix_signature() -> bool:
         print("[WEBHOOK] Missing svix headers", flush=True)
         return False
 
-    # Reject payloads older than 5 minutes
     try:
         if abs(time.time() - int(svix_timestamp)) > 300:
             print("[WEBHOOK] Timestamp too old", flush=True)
@@ -102,7 +104,7 @@ def _cascade_delete_by_clerk_id(clerk_user_id: str) -> dict:
             r = msgCollection.delete_many({"lead_id": {"$in": lead_ids}})
             messages_deleted = r.deleted_count
 
-        leads_deleted    = leadCollection.delete_many({"company_id": company_id}).deleted_count
+        leads_deleted = leadCollection.delete_many({"company_id": company_id}).deleted_count
         campaigns_deleted = campCollection.delete_many({"company_id": company_id}).deleted_count
 
         try:
@@ -129,6 +131,10 @@ def _cascade_delete_by_clerk_id(clerk_user_id: str) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────
+# Meta WhatsApp helpers
+# ─────────────────────────────────────────────────────────────
+
 def _parse_meta_timestamp(value) -> datetime:
     try:
         return datetime.utcfromtimestamp(int(value))
@@ -145,24 +151,43 @@ def _extract_body_preview(message: dict) -> str:
 
     if message_type == "text":
         return str(message.get("text", {}).get("body", "")).strip()
+
     if message_type == "image":
         return "[image]"
+
     if message_type == "document":
         return "[document]"
+
     if message_type == "audio":
         return "[audio]"
+
     if message_type == "video":
         return "[video]"
+
     if message_type == "sticker":
         return "[sticker]"
+
     if message_type == "interactive":
+        interactive = message.get("interactive", {}) or {}
+        interactive_type = str(interactive.get("type", "")).lower()
+
+        if interactive_type == "button_reply":
+            return str(interactive.get("button_reply", {}).get("title", "[button reply]")).strip()
+
+        if interactive_type == "list_reply":
+            return str(interactive.get("list_reply", {}).get("title", "[list reply]")).strip()
+
         return "[interactive reply]"
+
     if message_type == "button":
-        return "[button reply]"
+        return str(message.get("button", {}).get("text", "[button reply]")).strip()
+
     if message_type == "reaction":
         return "[reaction]"
+
     if message_type == "location":
         return "[location]"
+
     if message_type == "contacts":
         return "[contact card]"
 
@@ -170,9 +195,36 @@ def _extract_body_preview(message: dict) -> str:
 
 
 def _resolve_company_by_meta_phone_number_id(phone_number_id: str):
+    """
+    Resolve company by Meta phone_number_id.
+
+    Supports current flat fields and future nested WhatsApp config fields.
+    """
     if not phone_number_id:
         return None
-    return compCollection.find_one({"meta_phone_number_id": str(phone_number_id).strip()})
+
+    pid = str(phone_number_id).strip()
+
+    company = compCollection.find_one({
+        "$or": [
+            {"meta_phone_number_id": pid},
+            {"whatsapp.phone_number_id": pid},
+            {"whatsapp.meta_phone_number_id": pid},
+        ]
+    })
+
+    if company:
+        print(
+            f"[META WEBHOOK] Company resolved by phone_number_id={pid} company_id={company.get('_id')}",
+            flush=True,
+        )
+    else:
+        print(
+            f"[META WEBHOOK] No company found for phone_number_id={pid}",
+            flush=True,
+        )
+
+    return company
 
 
 def _load_company_by_company_id(company_id: str):
@@ -198,16 +250,23 @@ def _resolve_company_for_inbound(phone_number_id: str, from_phone: str):
         },
         sort=[("created_at", -1)],
     )
+
     if not recent_message:
+        print(
+            f"[META WEBHOOK] No fallback company for inbound contact_phone={normalized_from}",
+            flush=True,
+        )
         return None
 
     fallback_company = _load_company_by_company_id(recent_message.get("company_id", ""))
+
     if fallback_company:
         print(
             f"[META WEBHOOK] Fallback inbound company match via contact_phone={normalized_from} "
             f"company_id={recent_message.get('company_id')}",
             flush=True,
         )
+
     return fallback_company
 
 
@@ -222,16 +281,23 @@ def _resolve_company_for_status(phone_number_id: str, meta_message_id: str):
             "meta_message_id": str(meta_message_id or "").strip(),
         }
     )
+
     if not existing_message:
+        print(
+            f"[META WEBHOOK] No fallback company for status meta_message_id={meta_message_id}",
+            flush=True,
+        )
         return None
 
     fallback_company = _load_company_by_company_id(existing_message.get("company_id", ""))
+
     if fallback_company:
         print(
             f"[META WEBHOOK] Fallback status company match via meta_message_id={meta_message_id} "
             f"company_id={existing_message.get('company_id')}",
             flush=True,
         )
+
     return fallback_company
 
 
@@ -242,15 +308,31 @@ def _find_lead_by_phone(company_id: str, phone: str):
 
     leads = leadCollection.find(
         {"company_id": company_id},
-        {"name": 1, "phone": 1, "mobile": 1, "phone_number": 1, "contact_number": 1,
-         "contact_phone": 1, "whatsapp": 1, "whatsapp_number": 1},
+        {
+            "name": 1,
+            "phone": 1,
+            "mobile": 1,
+            "phone_number": 1,
+            "contact_number": 1,
+            "contact_phone": 1,
+            "whatsapp": 1,
+            "whatsapp_number": 1,
+        },
     )
 
     for lead in leads:
-        for field in ("phone", "mobile", "phone_number", "contact_number",
-                      "contact_phone", "whatsapp", "whatsapp_number"):
+        for field in (
+            "phone",
+            "mobile",
+            "phone_number",
+            "contact_number",
+            "contact_phone",
+            "whatsapp",
+            "whatsapp_number",
+        ):
             if _normalize_phone(lead.get(field, "")) == normalized:
                 return lead
+
     return None
 
 
@@ -258,8 +340,10 @@ def _pick_contact_name(contacts: list, wa_id: str) -> str:
     for contact in contacts or []:
         if str(contact.get("wa_id", "")).strip() == str(wa_id or "").strip():
             return str(contact.get("profile", {}).get("name", "")).strip()
+
     if contacts:
         return str(contacts[0].get("profile", {}).get("name", "")).strip()
+
     return ""
 
 
@@ -267,92 +351,102 @@ def _resolve_status(current_status: str, incoming_status: str) -> str:
     current = str(current_status or "pending").strip().lower()
     incoming = str(incoming_status or "").strip().lower()
 
-    # Inbound "received" is terminal — outbound status codes must never overwrite it
     if current in _INBOUND_STATUSES:
         return current
+
     if incoming == "failed":
         return current if current == "read" else "failed"
+
     if incoming not in META_STATUS_ORDER:
         return current
+
     if current == "failed":
         return incoming
+
     return incoming if META_STATUS_ORDER[incoming] >= META_STATUS_ORDER.get(current, 0) else current
 
 
 def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
-    # message_echo = AGE's own outbound message reflected back; skip it
+    """
+    Handle inbound user messages from Meta.
+
+    Important:
+    - Real messages[] payloads from webhook are lead/customer messages.
+    - These must be saved as direction=inbound and status=received.
+    - AGE outbound sending should only happen in send_text/send_template routes.
+    """
     message_type_raw = str(message.get("type", "")).strip().lower()
-    if message_type_raw == "message_echo":
-        print(f"[META WEBHOOK] Skipping message_echo: {message.get('id', '')}", flush=True)
-        return
+    meta_message_id = str(message.get("id", "")).strip()
+    raw_from_phone = str(message.get("from", "")).strip()
+    from_phone = _normalize_phone(raw_from_phone)
 
     phone_number_id = str(metadata.get("phone_number_id", "")).strip()
-    from_phone = _normalize_phone(message.get("from", ""))
+    display_phone_number = str(metadata.get("display_phone_number", "")).strip()
+
+    if message_type_raw in {"message_echo", "echo"} or message.get("message_echo"):
+        print(
+            f"[META WEBHOOK][INBOUND_SKIP_ECHO] id={meta_message_id} type={message_type_raw}",
+            flush=True,
+        )
+        return
+
+    body_preview = _extract_body_preview(message)
+    received_at = _parse_meta_timestamp(message.get("timestamp"))
+    contact_name = _pick_contact_name(contacts, raw_from_phone)
+    to_phone = _normalize_phone(display_phone_number)
+
+    print(
+        "[META WEBHOOK][INBOUND_START] "
+        f"id={meta_message_id} "
+        f"type={message_type_raw} "
+        f"from_raw={raw_from_phone} "
+        f"from_norm={from_phone} "
+        f"phone_number_id={phone_number_id} "
+        f"display_phone={display_phone_number} "
+        f"preview={body_preview!r}",
+        flush=True,
+    )
+
     company = _resolve_company_for_inbound(phone_number_id, from_phone)
+
     if not company:
         print(
-            f"[META WEBHOOK] Ignoring inbound message for unknown phone_number_id={phone_number_id} "
-            f"from_phone={from_phone}",
+            "[META WEBHOOK][INBOUND_NO_COMPANY] "
+            f"id={meta_message_id} phone_number_id={phone_number_id} from_phone={from_phone}",
             flush=True,
         )
         return
 
     company_id = str(company["_id"])
-    meta_message_id = str(message.get("id", "")).strip()
 
     if not meta_message_id or not from_phone:
-        print("[META WEBHOOK] Inbound message missing id or sender phone", flush=True)
+        print(
+            "[META WEBHOOK][INBOUND_BAD_PAYLOAD] "
+            f"id={meta_message_id} from_phone={from_phone}",
+            flush=True,
+        )
         return
 
-    received_at = _parse_meta_timestamp(message.get("timestamp"))
-    contact_name = _pick_contact_name(contacts, message.get("from", ""))
     matched_lead = _find_lead_by_phone(company_id, from_phone)
-    body_preview = _extract_body_preview(message)
+    lead_id = str(matched_lead["_id"]) if matched_lead else ""
+    lead_name = str(matched_lead.get("name", "")).strip() if matched_lead else contact_name
     message_type = message_type_raw or "text"
-    to_phone = _normalize_phone(metadata.get("display_phone_number", ""))
 
     print(
-        f"[META WEBHOOK] Inbound message from={from_phone} id={meta_message_id} "
-        f"type={message_type} preview={body_preview!r}",
+        "[META WEBHOOK][INBOUND_MATCH] "
+        f"id={meta_message_id} company_id={company_id} "
+        f"lead_id={lead_id or 'NONE'} lead_name={lead_name!r}",
         flush=True,
     )
 
-    # If a status webhook arrived first it may have created an outbound placeholder.
-    # Correct it to inbound instead of treating it as a duplicate.
-    existing = waMessagesCollection.find_one({"provider": "meta_cloud", "meta_message_id": meta_message_id})
-    if existing:
-        if existing.get("direction") == "outbound":
-            print(
-                f"[META WEBHOOK] Correcting outbound placeholder → inbound: {meta_message_id}",
-                flush=True,
-            )
-            waMessagesCollection.update_one(
-                {"_id": existing["_id"]},
-                {"$set": {
-                    "direction": "inbound",
-                    "status": "received",
-                    "from_phone": from_phone,
-                    "to_phone": to_phone,
-                    "contact_phone": from_phone,
-                    "body_preview": body_preview,
-                    "message_type": message_type,
-                    "lead_id": str(matched_lead["_id"]) if matched_lead else existing.get("lead_id", ""),
-                    "lead_name": str(matched_lead.get("name", "")).strip() if matched_lead else contact_name,
-                    "from_name": contact_name,
-                    "company_id": company_id,
-                    "status_timestamps": {"received": received_at},
-                    "last_webhook_payload": {"metadata": metadata, "contacts": contacts, "message": message},
-                    "created_at": received_at,
-                    "updated_at": received_at,
-                }},
-            )
-        else:
-            print(f"[META WEBHOOK] Duplicate inbound message ignored: {meta_message_id}", flush=True)
-        return
+    existing = waMessagesCollection.find_one({
+        "provider": "meta_cloud",
+        "meta_message_id": meta_message_id,
+    })
 
-    log_doc = {
+    inbound_set_fields = {
         "company_id": company_id,
-        "lead_id": str(matched_lead["_id"]) if matched_lead else "",
+        "lead_id": lead_id,
         "user_id": "",
         "channel": "whatsapp",
         "direction": "inbound",
@@ -360,7 +454,7 @@ def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
         "contact_phone": from_phone,
         "from_phone": from_phone,
         "to_phone": to_phone,
-        "lead_name": str(matched_lead.get("name", "")).strip() if matched_lead else contact_name,
+        "lead_name": lead_name,
         "from_name": contact_name,
         "template_name": "",
         "language_code": "",
@@ -377,28 +471,79 @@ def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
             "contacts": contacts,
             "message": message,
         },
-        "created_at": received_at,
         "updated_at": received_at,
     }
-    waMessagesCollection.insert_one(log_doc)
-    print(f"[META WEBHOOK] Inbound message saved: direction=inbound status=received id={meta_message_id}", flush=True)
+
+    if existing:
+        existing_direction = str(existing.get("direction", "")).strip().lower()
+
+        if existing_direction == "inbound":
+            print(
+                f"[META WEBHOOK][INBOUND_DUPLICATE] id={meta_message_id} already inbound",
+                flush=True,
+            )
+            return
+
+        print(
+            "[META WEBHOOK][INBOUND_CORRECT_EXISTING] "
+            f"id={meta_message_id} old_direction={existing_direction}",
+            flush=True,
+        )
+
+        waMessagesCollection.update_one(
+            {"_id": existing["_id"]},
+            {"$set": inbound_set_fields},
+        )
+
+    else:
+        log_doc = {
+            **inbound_set_fields,
+            "created_at": received_at,
+        }
+
+        waMessagesCollection.insert_one(log_doc)
+
+        print(
+            "[META WEBHOOK][INBOUND_INSERTED] "
+            f"id={meta_message_id} direction=inbound status=received body={body_preview!r}",
+            flush=True,
+        )
 
     if matched_lead:
+        window_until = received_at + timedelta(hours=24)
+
         leadCollection.update_one(
             {"_id": matched_lead["_id"]},
-            {"$set": {
-                "last_whatsapp_message_at": received_at,
-                "last_whatsapp_direction": "inbound",
-                "last_whatsapp_preview": body_preview,
-                "whatsapp_window_open_until": received_at + timedelta(hours=24),
-            }},
+            {
+                "$set": {
+                    "last_whatsapp_message_at": received_at,
+                    "last_whatsapp_direction": "inbound",
+                    "last_whatsapp_preview": body_preview,
+                    "whatsapp_window_open_until": window_until,
+                }
+            },
+        )
+
+        print(
+            "[META WEBHOOK][LEAD_WINDOW_OPENED] "
+            f"lead_id={lead_id} until={window_until.isoformat()}",
+            flush=True,
+        )
+
+    else:
+        print(
+            "[META WEBHOOK][INBOUND_UNMATCHED] "
+            f"company_id={company_id} contact_phone={from_phone} body={body_preview!r}",
+            flush=True,
         )
 
 
 def _handle_status_update(metadata: dict, status: dict):
     phone_number_id = str(metadata.get("phone_number_id", "")).strip()
     meta_message_id = str(status.get("id", "")).strip()
+
     company = _resolve_company_for_status(phone_number_id, meta_message_id)
+
     if not company:
         print(
             f"[META WEBHOOK] Ignoring status for unknown phone_number_id={phone_number_id} "
@@ -422,13 +567,13 @@ def _handle_status_update(metadata: dict, status: dict):
         "provider": "meta_cloud",
         "meta_message_id": meta_message_id,
     })
+
     if not existing:
         existing = waMessagesCollection.find_one({
             "provider": "meta_cloud",
             "meta_message_id": meta_message_id,
         })
 
-    # Status updates track outbound delivery. If the row is inbound, skip it entirely.
     if existing and existing.get("direction") == "inbound":
         print(
             f"[META WEBHOOK] Skipping status update on inbound row: "
@@ -438,6 +583,7 @@ def _handle_status_update(metadata: dict, status: dict):
         return
 
     error_details = {}
+
     if incoming_status == "failed" and status.get("errors"):
         first_error = status["errors"][0] if isinstance(status["errors"], list) and status["errors"] else {}
         error_details = {
@@ -448,12 +594,12 @@ def _handle_status_update(metadata: dict, status: dict):
         }
 
     if not existing:
-        # Guard: if an inbound row already exists for this id (any company), don't create an outbound placeholder
         inbound_check = waMessagesCollection.find_one({
             "provider": "meta_cloud",
             "meta_message_id": meta_message_id,
             "direction": "inbound",
         })
+
         if inbound_check:
             print(
                 f"[META WEBHOOK] Skipping outbound placeholder — inbound row already exists: {meta_message_id}",
@@ -466,7 +612,9 @@ def _handle_status_update(metadata: dict, status: dict):
             f"meta_message_id={meta_message_id} contact_phone={contact_phone}",
             flush=True,
         )
+
         matched_lead = _find_lead_by_phone(company_id, contact_phone)
+
         waMessagesCollection.insert_one({
             "company_id": company_id,
             "lead_id": str(matched_lead["_id"]) if matched_lead else "",
@@ -496,6 +644,7 @@ def _handle_status_update(metadata: dict, status: dict):
             "created_at": event_at,
             "updated_at": event_at,
         })
+
         return
 
     current_status = str(existing.get("status", "pending")).strip().lower()
@@ -503,7 +652,7 @@ def _handle_status_update(metadata: dict, status: dict):
 
     print(
         f"[META WEBHOOK] Status update: meta_message_id={meta_message_id} "
-        f"{current_status} → {final_status} (incoming={incoming_status})",
+        f"{current_status} → {final_status} incoming={incoming_status}",
         flush=True,
     )
 
@@ -516,7 +665,7 @@ def _handle_status_update(metadata: dict, status: dict):
         },
         "updated_at": event_at,
     }
-    # Only update from_phone for outbound rows — inbound from_phone is the user's phone, not the business phone
+
     if existing.get("direction") != "inbound":
         set_fields["from_phone"] = business_phone or existing.get("from_phone", "")
 
@@ -534,13 +683,17 @@ def _handle_status_update(metadata: dict, status: dict):
     waMessagesCollection.update_one({"_id": existing["_id"]}, {"$set": set_fields})
 
 
+# ─────────────────────────────────────────────────────────────
+# Meta WhatsApp webhooks
+# ─────────────────────────────────────────────────────────────
+
 @webhooks_bp.route("/webhooks/meta/whatsapp", methods=["GET"])
 @webhooks_bp.route("/meta/whatsapp", methods=["GET"])
 def meta_whatsapp_webhook_verify():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-    expected_token = os.getenv("META_WEBHOOK_VERIFY_TOKEN")
+    expected_token = os.getenv("META_WEBHOOK_VERIFY_TOKEN", "")
 
     print("[META VERIFY] args:", dict(request.args), flush=True)
     print("[META VERIFY] mode:", mode, flush=True)
@@ -561,45 +714,130 @@ def meta_whatsapp_webhook():
 
     try:
         entry_count = len(payload.get("entry", []) or [])
-        print(f"[META WEBHOOK] Received payload with {entry_count} entr{'y' if entry_count == 1 else 'ies'}", flush=True)
+
+        print(
+            f"[META WEBHOOK] Received payload entries={entry_count}",
+            flush=True,
+        )
 
         for entry in payload.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {}) or {}
+                field = change.get("field", "")
+
                 metadata = value.get("metadata", {}) or {}
                 contacts = value.get("contacts", []) or []
                 messages = value.get("messages", []) or []
                 statuses = value.get("statuses", []) or []
 
                 print(
-                    "[META WEBHOOK] change"
-                    f" phone_number_id={metadata.get('phone_number_id', '')}"
-                    f" display_phone_number={metadata.get('display_phone_number', '')}"
-                    f" messages={len(messages)}"
-                    f" statuses={len(statuses)}",
+                    "[META WEBHOOK][CHANGE] "
+                    f"field={field} "
+                    f"phone_number_id={metadata.get('phone_number_id', '')} "
+                    f"display_phone_number={metadata.get('display_phone_number', '')} "
+                    f"messages={len(messages)} "
+                    f"statuses={len(statuses)}",
                     flush=True,
                 )
 
                 for message in messages:
                     print(
-                        f"[META WEBHOOK] Processing message id={message.get('id', '')} "
-                        f"type={message.get('type', '')} from={message.get('from', '')}",
+                        "[META WEBHOOK][DISPATCH_MESSAGE] "
+                        f"id={message.get('id', '')} "
+                        f"type={message.get('type', '')} "
+                        f"from={message.get('from', '')}",
                         flush=True,
                     )
+
                     _handle_inbound_message(metadata, contacts, message)
 
                 for status in statuses:
                     print(
-                        f"[META WEBHOOK] Processing status id={status.get('id', '')} "
-                        f"status={status.get('status', '')} recipient={status.get('recipient_id', '')}",
+                        "[META WEBHOOK][DISPATCH_STATUS] "
+                        f"id={status.get('id', '')} "
+                        f"status={status.get('status', '')} "
+                        f"recipient={status.get('recipient_id', '')}",
                         flush=True,
                     )
+
                     _handle_status_update(metadata, status)
+
     except Exception as exc:
         print(f"[META WEBHOOK] Processing error: {exc}", flush=True)
 
     return jsonify({"received": True}), 200
 
+
+@webhooks_bp.route("/webhooks/meta/debug/latest", methods=["GET"])
+def meta_whatsapp_debug_latest():
+    """
+    Temporary debug endpoint.
+
+    Usage:
+    /webhooks/meta/debug/latest?phone=919569955721&company_id=...&limit=10
+
+    Requires X-Admin-Pin header matching ADMIN_PIN.
+    Remove this after debugging.
+    """
+    admin_pin = os.getenv("ADMIN_PIN", "")
+    request_pin = request.headers.get("X-Admin-Pin", "")
+
+    if admin_pin and request_pin != admin_pin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    phone = _normalize_phone(request.args.get("phone", ""))
+    company_id = str(request.args.get("company_id", "")).strip()
+
+    try:
+        limit = int(request.args.get("limit", 10) or 10)
+    except Exception:
+        limit = 10
+
+    limit = max(1, min(limit, 50))
+
+    query = {"provider": "meta_cloud"}
+
+    if phone:
+        query["contact_phone"] = phone
+
+    if company_id:
+        query["company_id"] = company_id
+
+    rows = list(
+        waMessagesCollection.find(query)
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+
+    result = []
+
+    for row in rows:
+        result.append({
+            "_id": str(row.get("_id")),
+            "company_id": row.get("company_id", ""),
+            "lead_id": row.get("lead_id", ""),
+            "direction": row.get("direction", ""),
+            "status": row.get("status", ""),
+            "contact_phone": row.get("contact_phone", ""),
+            "from_phone": row.get("from_phone", ""),
+            "to_phone": row.get("to_phone", ""),
+            "body_preview": row.get("body_preview", ""),
+            "message_type": row.get("message_type", ""),
+            "meta_message_id": row.get("meta_message_id", ""),
+            "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+            "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
+        })
+
+    return jsonify({
+        "query": query,
+        "count": len(result),
+        "messages": result,
+    }), 200
+
+
+# ─────────────────────────────────────────────────────────────
+# Clerk webhook
+# ─────────────────────────────────────────────────────────────
 
 @webhooks_bp.route("/webhooks/clerk", methods=["POST"])
 def clerk_webhook():
@@ -613,15 +851,20 @@ def clerk_webhook():
 
     if event_type == "user.deleted":
         clerk_user_id = payload.get("data", {}).get("id")
+
         if not clerk_user_id:
             return jsonify({"error": "Missing user id in payload"}), 400
 
         result = _cascade_delete_by_clerk_id(clerk_user_id)
+
         return jsonify({"received": True, **result}), 200
 
-    # All other events — acknowledge but do nothing
     return jsonify({"received": True, "event": event_type}), 200
 
+
+# ─────────────────────────────────────────────────────────────
+# SES bounce/complaint webhook
+# ─────────────────────────────────────────────────────────────
 
 @webhooks_bp.route("/webhooks/ses", methods=["POST"])
 def ses_bounce_webhook():
@@ -632,11 +875,12 @@ def ses_bounce_webhook():
 
     msg_type = payload.get("Type")
 
-    # SNS requires us to hit SubscribeURL to confirm the subscription
     if msg_type == "SubscriptionConfirmation":
         subscribe_url = payload.get("SubscribeURL", "")
+
         if subscribe_url.startswith("https://sns."):
             urlopen(subscribe_url)
+
         return jsonify({"received": True}), 200
 
     if msg_type != "Notification":
@@ -652,31 +896,40 @@ def ses_bounce_webhook():
     if notification_type == "Bounce":
         bounce = message.get("bounce", {})
         bounce_type = bounce.get("bounceType", "Permanent").lower()
+
         for recipient in bounce.get("bouncedRecipients", []):
             email = (recipient.get("emailAddress") or "").strip().lower()
+
             if email:
                 leadCollection.update_many(
                     {"email": re.compile(f"^{re.escape(email)}$", re.IGNORECASE)},
-                    {"$set": {
-                        "email_bounced": True,
-                        "bounce_type": bounce_type,
-                        "bounced_at": datetime.utcnow(),
-                    }},
+                    {
+                        "$set": {
+                            "email_bounced": True,
+                            "bounce_type": bounce_type,
+                            "bounced_at": datetime.utcnow(),
+                        }
+                    },
                 )
+
                 print(f"[SES] Bounce ({bounce_type}) for {email}", flush=True)
 
     elif notification_type == "Complaint":
         for recipient in message.get("complaint", {}).get("complainedRecipients", []):
             email = (recipient.get("emailAddress") or "").strip().lower()
+
             if email:
                 leadCollection.update_many(
                     {"email": re.compile(f"^{re.escape(email)}$", re.IGNORECASE)},
-                    {"$set": {
-                        "email_bounced": True,
-                        "bounce_type": "complaint",
-                        "bounced_at": datetime.utcnow(),
-                    }},
+                    {
+                        "$set": {
+                            "email_bounced": True,
+                            "bounce_type": "complaint",
+                            "bounced_at": datetime.utcnow(),
+                        }
+                    },
                 )
+
                 print(f"[SES] Complaint for {email}", flush=True)
 
     return jsonify({"received": True}), 200
