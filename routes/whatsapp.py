@@ -417,6 +417,11 @@ def meta_send_template():
         if not template_name:
             return jsonify({"error": "template_name is required"}), 400
 
+        # Reject non-approved templates — only approved ones can be sent
+        known_tpl = next((t for t in PREBUILT_TEMPLATES if t["name"] == template_name), None)
+        if known_tpl and known_tpl.get("status") != "approved":
+            return jsonify({"error": f"Template '{template_name}' is {known_tpl.get('status', 'not approved')} and cannot be sent until Meta approves it."}), 403
+
         company = compCollection.find_one({"_id": ObjectId(company_id)})
         if not company:
             return jsonify({"error": "Company not found"}), 404
