@@ -31,6 +31,8 @@ META_STATUS_ORDER = {
     "delivered": 2,
     "read": 3,
 }
+# "received" is the terminal status for inbound messages — never replace it with outbound status codes
+_INBOUND_STATUSES = {"received"}
 
 
 def _verify_svix_signature() -> bool:
@@ -265,6 +267,9 @@ def _resolve_status(current_status: str, incoming_status: str) -> str:
     current = str(current_status or "pending").strip().lower()
     incoming = str(incoming_status or "").strip().lower()
 
+    # Inbound "received" is terminal — outbound status codes must never overwrite it
+    if current in _INBOUND_STATUSES:
+        return current
     if incoming == "failed":
         return current if current == "read" else "failed"
     if incoming not in META_STATUS_ORDER:
@@ -275,6 +280,12 @@ def _resolve_status(current_status: str, incoming_status: str) -> str:
 
 
 def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
+    # message_echo = AGE's own outbound message reflected back; skip it
+    message_type_raw = str(message.get("type", "")).strip().lower()
+    if message_type_raw == "message_echo":
+        print(f"[META WEBHOOK] Skipping message_echo: {message.get('id', '')}", flush=True)
+        return
+
     phone_number_id = str(metadata.get("phone_number_id", "")).strip()
     from_phone = _normalize_phone(message.get("from", ""))
     company = _resolve_company_for_inbound(phone_number_id, from_phone)
@@ -293,16 +304,51 @@ def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
         print("[META WEBHOOK] Inbound message missing id or sender phone", flush=True)
         return
 
-    if waMessagesCollection.find_one({"provider": "meta_cloud", "meta_message_id": meta_message_id}):
-        print(f"[META WEBHOOK] Duplicate inbound message ignored: {meta_message_id}", flush=True)
-        return
-
     received_at = _parse_meta_timestamp(message.get("timestamp"))
     contact_name = _pick_contact_name(contacts, message.get("from", ""))
     matched_lead = _find_lead_by_phone(company_id, from_phone)
     body_preview = _extract_body_preview(message)
-    message_type = str(message.get("type", "text")).strip().lower() or "text"
+    message_type = message_type_raw or "text"
     to_phone = _normalize_phone(metadata.get("display_phone_number", ""))
+
+    print(
+        f"[META WEBHOOK] Inbound message from={from_phone} id={meta_message_id} "
+        f"type={message_type} preview={body_preview!r}",
+        flush=True,
+    )
+
+    # If a status webhook arrived first it may have created an outbound placeholder.
+    # Correct it to inbound instead of treating it as a duplicate.
+    existing = waMessagesCollection.find_one({"provider": "meta_cloud", "meta_message_id": meta_message_id})
+    if existing:
+        if existing.get("direction") == "outbound":
+            print(
+                f"[META WEBHOOK] Correcting outbound placeholder → inbound: {meta_message_id}",
+                flush=True,
+            )
+            waMessagesCollection.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {
+                    "direction": "inbound",
+                    "status": "received",
+                    "from_phone": from_phone,
+                    "to_phone": to_phone,
+                    "contact_phone": from_phone,
+                    "body_preview": body_preview,
+                    "message_type": message_type,
+                    "lead_id": str(matched_lead["_id"]) if matched_lead else existing.get("lead_id", ""),
+                    "lead_name": str(matched_lead.get("name", "")).strip() if matched_lead else contact_name,
+                    "from_name": contact_name,
+                    "company_id": company_id,
+                    "status_timestamps": {"received": received_at},
+                    "last_webhook_payload": {"metadata": metadata, "contacts": contacts, "message": message},
+                    "created_at": received_at,
+                    "updated_at": received_at,
+                }},
+            )
+        else:
+            print(f"[META WEBHOOK] Duplicate inbound message ignored: {meta_message_id}", flush=True)
+        return
 
     log_doc = {
         "company_id": company_id,
@@ -335,6 +381,7 @@ def _handle_inbound_message(metadata: dict, contacts: list, message: dict):
         "updated_at": received_at,
     }
     waMessagesCollection.insert_one(log_doc)
+    print(f"[META WEBHOOK] Inbound message saved: direction=inbound status=received id={meta_message_id}", flush=True)
 
     if matched_lead:
         leadCollection.update_one(
@@ -381,6 +428,15 @@ def _handle_status_update(metadata: dict, status: dict):
             "meta_message_id": meta_message_id,
         })
 
+    # Status updates track outbound delivery. If the row is inbound, skip it entirely.
+    if existing and existing.get("direction") == "inbound":
+        print(
+            f"[META WEBHOOK] Skipping status update on inbound row: "
+            f"meta_message_id={meta_message_id} incoming_status={incoming_status}",
+            flush=True,
+        )
+        return
+
     error_details = {}
     if incoming_status == "failed" and status.get("errors"):
         first_error = status["errors"][0] if isinstance(status["errors"], list) and status["errors"] else {}
@@ -392,6 +448,24 @@ def _handle_status_update(metadata: dict, status: dict):
         }
 
     if not existing:
+        # Guard: if an inbound row already exists for this id (any company), don't create an outbound placeholder
+        inbound_check = waMessagesCollection.find_one({
+            "provider": "meta_cloud",
+            "meta_message_id": meta_message_id,
+            "direction": "inbound",
+        })
+        if inbound_check:
+            print(
+                f"[META WEBHOOK] Skipping outbound placeholder — inbound row already exists: {meta_message_id}",
+                flush=True,
+            )
+            return
+
+        print(
+            f"[META WEBHOOK] Creating outbound placeholder for status={incoming_status} "
+            f"meta_message_id={meta_message_id} contact_phone={contact_phone}",
+            flush=True,
+        )
         matched_lead = _find_lead_by_phone(company_id, contact_phone)
         waMessagesCollection.insert_one({
             "company_id": company_id,
@@ -427,9 +501,14 @@ def _handle_status_update(metadata: dict, status: dict):
     current_status = str(existing.get("status", "pending")).strip().lower()
     final_status = _resolve_status(current_status, incoming_status)
 
+    print(
+        f"[META WEBHOOK] Status update: meta_message_id={meta_message_id} "
+        f"{current_status} → {final_status} (incoming={incoming_status})",
+        flush=True,
+    )
+
     set_fields = {
         "contact_phone": contact_phone or existing.get("contact_phone", ""),
-        "from_phone": business_phone or existing.get("from_phone", ""),
         "to_phone": contact_phone or existing.get("to_phone", ""),
         "last_webhook_payload": {
             "metadata": metadata,
@@ -437,6 +516,9 @@ def _handle_status_update(metadata: dict, status: dict):
         },
         "updated_at": event_at,
     }
+    # Only update from_phone for outbound rows — inbound from_phone is the user's phone, not the business phone
+    if existing.get("direction") != "inbound":
+        set_fields["from_phone"] = business_phone or existing.get("from_phone", "")
 
     if final_status != current_status:
         set_fields["status"] = final_status
@@ -499,9 +581,19 @@ def meta_whatsapp_webhook():
                 )
 
                 for message in messages:
+                    print(
+                        f"[META WEBHOOK] Processing message id={message.get('id', '')} "
+                        f"type={message.get('type', '')} from={message.get('from', '')}",
+                        flush=True,
+                    )
                     _handle_inbound_message(metadata, contacts, message)
 
                 for status in statuses:
+                    print(
+                        f"[META WEBHOOK] Processing status id={status.get('id', '')} "
+                        f"status={status.get('status', '')} recipient={status.get('recipient_id', '')}",
+                        flush=True,
+                    )
                     _handle_status_update(metadata, status)
     except Exception as exc:
         print(f"[META WEBHOOK] Processing error: {exc}", flush=True)
