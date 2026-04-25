@@ -664,9 +664,26 @@ def get_meta_thread(company_id, contact_phone):
             st = {}
             for k, v in msg.get("status_timestamps", {}).items():
                 st[k] = v.isoformat() if hasattr(v, "isoformat") else str(v)
+
+            # Resolve direction with fallback: if the field is missing, infer it.
+            # Inbound messages have from_phone == contact_phone (sender is the lead).
+            # Outbound messages have from_phone == "" or the business number.
+            stored_dir = msg.get("direction", "")
+            if stored_dir in ("inbound", "outbound"):
+                direction = stored_dir
+            else:
+                from_phone_stored = msg.get("from_phone", "")
+                contact_phone_stored = msg.get("contact_phone", contact_phone)
+                if from_phone_stored and from_phone_stored == contact_phone_stored:
+                    direction = "inbound"
+                else:
+                    direction = "outbound"
+
             result.append({
                 "id":                str(msg["_id"]),
-                "direction":         msg.get("direction", "outbound"),
+                "direction":         direction,
+                "from_phone":        msg.get("from_phone", ""),
+                "contact_phone":     msg.get("contact_phone", contact_phone),
                 "body_preview":      msg.get("body_preview", ""),
                 "template_name":     msg.get("template_name", ""),
                 "message_type":      msg.get("message_type", ""),
@@ -674,6 +691,7 @@ def get_meta_thread(company_id, contact_phone):
                 "meta_message_id":   msg.get("meta_message_id", ""),
                 "user_id":           msg.get("user_id", ""),
                 "from_name":         msg.get("from_name", ""),
+                "lead_name":         msg.get("lead_name", ""),
                 "created_at":        msg["created_at"].isoformat() if msg.get("created_at") else "",
                 "status_timestamps": st,
             })
