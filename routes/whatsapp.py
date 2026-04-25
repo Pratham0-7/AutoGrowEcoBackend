@@ -693,8 +693,12 @@ def meta_send_text_route():
         if not company_id or not phone or not text_body:
             return jsonify({"error": "company_id, phone, and message are required"}), 400
 
-        # ── 24h window enforcement ──────────────────────────────────────────────
-        window_open = False
+        # ── 24h window enforcement (mirrors get_meta_conversations logic) ─────────
+        normalized_phone = format_phone_meta(phone)
+        window_open  = False
+        window_until = None
+
+        # 1) Try lead.whatsapp_window_open_until
         lead = None
         if lead_id:
             try:
@@ -703,21 +707,54 @@ def meta_send_text_route():
                 pass
 
         if not lead:
-            normalized = format_phone_meta(phone)
-            recent = waMessagesCollection.find_one(
-                {"provider": "meta_cloud", "contact_phone": normalized, "direction": "inbound"},
+            # Try to find lead via any recent inbound row for this phone
+            recent_with_lead = waMessagesCollection.find_one(
+                {
+                    "company_id":    company_id,
+                    "provider":      "meta_cloud",
+                    "contact_phone": normalized_phone,
+                    "direction":     "inbound",
+                    "lead_id":       {"$nin": ["", None]},
+                },
                 sort=[("created_at", -1)],
             )
-            if recent and recent.get("lead_id"):
+            if recent_with_lead and recent_with_lead.get("lead_id"):
                 try:
-                    lead = leadCollection.find_one({"_id": ObjectId(recent["lead_id"])})
+                    lead = leadCollection.find_one({"_id": ObjectId(recent_with_lead["lead_id"])})
                 except Exception:
                     pass
 
         if lead:
             wu = lead.get("whatsapp_window_open_until")
             if wu and wu > datetime.utcnow():
-                window_open = True
+                window_open  = True
+                window_until = wu.isoformat()
+
+        # 2) Fallback: latest inbound message created_at + 24 h (same as conversations endpoint)
+        if not window_open:
+            latest_inbound = waMessagesCollection.find_one(
+                {
+                    "company_id":    company_id,
+                    "provider":      "meta_cloud",
+                    "contact_phone": normalized_phone,
+                    "direction":     "inbound",
+                },
+                sort=[("created_at", -1)],
+            )
+            if latest_inbound:
+                ts = latest_inbound.get("created_at")
+                if ts and ts + timedelta(hours=24) > datetime.utcnow():
+                    window_open  = True
+                    window_until = (ts + timedelta(hours=24)).isoformat()
+
+            print(
+                f"[SEND_TEXT] window_check company={company_id} phone={phone} "
+                f"normalized={normalized_phone} lead_id={lead_id} "
+                f"lead_wu={lead.get('whatsapp_window_open_until') if lead else 'no_lead'} "
+                f"latest_inbound_at={latest_inbound.get('created_at') if latest_inbound else 'none'} "
+                f"window_until={window_until} window_open={window_open}",
+                flush=True,
+            )
 
         if not window_open:
             return jsonify({"error": "24h WhatsApp window is closed. Use a template message instead."}), 403
