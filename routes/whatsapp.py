@@ -10,6 +10,7 @@ from db import leadCollection, msgCollection, compCollection, waMessagesCollecti
 from services.whatsapp import send_whatsapp_text, send_whatsapp_template, format_phone_wa
 from services.meta_cloud import (
     send_meta_template,
+    send_meta_text,
     build_components,
     format_phone_meta,
     PREBUILT_TEMPLATES,
@@ -579,10 +580,15 @@ def get_meta_conversations(company_id):
                 conv_status = "no_reply"
 
             assigned_to = ""
+            window_open = False
+            window_until = None
             lead_id = conv.get("lead_id", "")
             if lead_id:
                 try:
-                    lead = leadCollection.find_one({"_id": ObjectId(lead_id)}, {"uploaded_by": 1})
+                    lead = leadCollection.find_one(
+                        {"_id": ObjectId(lead_id)},
+                        {"uploaded_by": 1, "whatsapp_window_open_until": 1},
+                    )
                     if lead:
                         ub = lead.get("uploaded_by", "")
                         if ub and ub != "gsheet_sync":
@@ -590,6 +596,10 @@ def get_meta_conversations(company_id):
                             user = usersCollection.find_one(user_q, {"name": 1})
                             if user:
                                 assigned_to = user.get("name", "")
+                        wu = lead.get("whatsapp_window_open_until")
+                        if wu and wu > datetime.utcnow():
+                            window_open = True
+                            window_until = wu.isoformat()
                 except Exception:
                     pass
 
@@ -605,6 +615,8 @@ def get_meta_conversations(company_id):
                 "total_count":    conv.get("total_count", 0),
                 "status":         conv_status,
                 "assigned_to":    assigned_to,
+                "window_open":    window_open,
+                "window_until":   window_until,
             })
 
         return jsonify({"conversations": result, "total": len(result)}), 200
@@ -644,6 +656,106 @@ def get_meta_thread(company_id, contact_phone):
             })
 
         return jsonify({"messages": result, "total": len(result)}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@whatsapp_bp.route("/whatsapp/meta/send_text", methods=["POST"])
+def meta_send_text_route():
+    try:
+        data = request.json or {}
+        company_id = str(data.get("company_id", "")).strip()
+        lead_id    = str(data.get("lead_id", "")).strip()
+        phone      = str(data.get("phone", "")).strip()
+        text_body  = str(data.get("message", "")).strip()
+        user_id    = str(data.get("user_id", "")).strip()
+        lead_name  = str(data.get("lead_name", "")).strip()
+
+        if not company_id or not phone or not text_body:
+            return jsonify({"error": "company_id, phone, and message are required"}), 400
+
+        # ── 24h window enforcement ──────────────────────────────────────────────
+        window_open = False
+        lead = None
+        if lead_id:
+            try:
+                lead = leadCollection.find_one({"_id": ObjectId(lead_id)})
+            except Exception:
+                pass
+
+        if not lead:
+            normalized = format_phone_meta(phone)
+            recent = waMessagesCollection.find_one(
+                {"provider": "meta_cloud", "contact_phone": normalized, "direction": "inbound"},
+                sort=[("created_at", -1)],
+            )
+            if recent and recent.get("lead_id"):
+                try:
+                    lead = leadCollection.find_one({"_id": ObjectId(recent["lead_id"])})
+                except Exception:
+                    pass
+
+        if lead:
+            wu = lead.get("whatsapp_window_open_until")
+            if wu and wu > datetime.utcnow():
+                window_open = True
+
+        if not window_open:
+            return jsonify({"error": "24h WhatsApp window is closed. Use a template message instead."}), 403
+
+        # ── Send ────────────────────────────────────────────────────────────────
+        company = compCollection.find_one({"_id": ObjectId(company_id)})
+        if not company:
+            return jsonify({"error": "Company not found"}), 404
+
+        phone_number_id = str(company.get("meta_phone_number_id", "")).strip() or _PLATFORM_META_PHONE_NUMBER_ID
+        access_token    = str(company.get("meta_access_token",    "")).strip() or _PLATFORM_META_ACCESS_TOKEN
+
+        now = datetime.utcnow()
+        log_doc = _build_meta_log_doc(
+            company_id=company_id,
+            lead_id=lead_id,
+            user_id=user_id,
+            phone=phone,
+            lead_name=lead_name,
+            template_name="",
+            language_code="",
+            variables_used={},
+            body_preview=text_body[:500],
+            now=now,
+            direction="outbound",
+            message_type="text",
+            status="pending",
+        )
+        inserted       = waMessagesCollection.insert_one(log_doc)
+        log_id         = inserted.inserted_id
+
+        result = send_meta_text(
+            phone_number_id=phone_number_id,
+            access_token=access_token,
+            to_phone=phone,
+            text_body=text_body,
+        )
+
+        final_status    = "sent" if result["ok"] else "failed"
+        final_status_at = datetime.utcnow()
+        waMessagesCollection.update_one(
+            {"_id": log_id},
+            {"$set": {
+                "status":            final_status,
+                "meta_message_id":   result.get("meta_message_id"),
+                "provider_response": result.get("provider_response", {}),
+                "error_details":     {} if result["ok"] else {"message": result.get("message", "Meta send failed")},
+                f"status_timestamps.{final_status}": final_status_at,
+                "updated_at":        final_status_at,
+            }},
+        )
+
+        if not result["ok"]:
+            return jsonify({"error": result.get("message", "Meta send failed"), "log_id": str(log_id)}), 400
+
+        return jsonify({"message": "Text sent", "meta_message_id": result["meta_message_id"], "log_id": str(log_id), "status": "sent"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

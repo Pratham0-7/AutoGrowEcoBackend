@@ -61,6 +61,47 @@ def _safe_json(resp):
         return {"raw_text": resp.text}
 
 
+def send_meta_text(
+    phone_number_id: str,
+    access_token: str,
+    to_phone: str,
+    text_body: str,
+) -> dict:
+    """
+    Send a free-form text message via Meta Cloud API.
+    Only valid within the 24-hour customer service window.
+    """
+    if not phone_number_id:
+        return {"ok": False, "message": "Meta phone_number_id not configured", "meta_message_id": None, "provider_response": {}}
+    if not access_token:
+        return {"ok": False, "message": "Meta access_token not configured", "meta_message_id": None, "provider_response": {}}
+
+    formatted_to = format_phone_meta(to_phone)
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": formatted_to,
+        "type": "text",
+        "text": {"body": str(text_body).strip()},
+    }
+    url = f"{META_GRAPH_BASE}/{phone_number_id}/messages"
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=20)
+        result = _safe_json(resp)
+        ok = 200 <= resp.status_code < 300 and "messages" in result
+        meta_message_id = result["messages"][0].get("id") if ok and result.get("messages") else None
+        print(f"[META CLOUD TEXT] to={formatted_to} HTTP {resp.status_code}", flush=True)
+        error_msg = None
+        if not ok:
+            err = result.get("error", {})
+            error_msg = err.get("message") or result.get("raw_text") or "Unknown Meta API error"
+        return {"ok": ok, "http_status": resp.status_code, "meta_message_id": meta_message_id, "message": "sent" if ok else error_msg, "provider_response": result}
+    except Exception as exc:
+        print(f"[META CLOUD TEXT] Exception: {exc}", flush=True)
+        return {"ok": False, "message": str(exc), "meta_message_id": None, "provider_response": {}}
+
+
 def send_meta_template(
     phone_number_id: str,
     access_token: str,
